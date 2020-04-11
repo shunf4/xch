@@ -1,0 +1,33 @@
+# This file specifies configuration for ESLint.
+
+---
+  root: true
+  parser: "@typescript-eslint/parser"
+  plugins:
+    - "@typescript-eslint"
+  extends:
+    - eslint:recommended
+    - "plugin:@typescript-eslint/eslint-recommended"
+    - "plugin:@typescript-eslint/recommended"
+  rules:
+    no-var: error
+    "@typescript-eslint/no-var-requires": off
+    indent: ["error", 2]
+    eqeqeq: error
+    no-unexpected-multiline: error
+    "@typescript-eslint/member-delimiter-style":
+      - error
+      - 
+        singleline:
+          delimiter: "comma"
+          requireLast: false
+        multiline:
+          delimiter: "comma"
+          requireLast: true
+    "@typescript-eslint/interface-name-prefix":
+      - warn
+      -
+        prefixWithI: always
+    "@typescript-eslint/no-empty-function": off
+  env:
+    node: true

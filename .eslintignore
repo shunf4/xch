@@ -1,0 +1,6 @@
+# This file specifies which files ESLint should ignore.
+
+node_modules
+built
+# istanbul nyc coverage
+coverage

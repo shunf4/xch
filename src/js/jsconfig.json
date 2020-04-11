@@ -1,0 +1,9 @@
+// To make intellisense work
+
+{
+  "compilerOptions": {
+    "module": "commonJS",
+    "target": "ES2017"
+  },
+  "include": ["**/*"]
+}

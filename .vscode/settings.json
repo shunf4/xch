@@ -1,0 +1,14 @@
+{
+    "editor.tabSize": 2,
+    // "terminal.integrated.shell.windows": "C:\\cygwin64\\bin\\bash.exe",
+    // "terminal.integrated.shellArgs.windows": [
+    //     "/bin/xhere",
+    //     "/bin/bash"
+    // ],
+    "search.exclude": {
+        "**/node_modules": false,
+        "/node_modules": false
+    },
+    "search.useIgnoreFiles": false,
+    "terminal.integrated.fontSize": 11
+}

@@ -1,0 +1,43 @@
+{
+  "name": "gp-blockchain",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "built/drive.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsc && node built/drive.js",
+    "mon": "tsc && nodemon built/drive.js",
+    "lint": "eslint --ext .ts ./src"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/debug": "^4.1.5",
+    "@types/dotenv": "^8.2.0",
+    "@types/multiaddr": "^7.2.0",
+    "@types/yaml": "^1.2.0",
+    "debug": "^4.1.1",
+    "dotenv": "^8.2.0",
+    "libp2p": "^0.27.3",
+    "libp2p-bootstrap": "^0.10.4",
+    "libp2p-crypto": "^0.17.6",
+    "libp2p-gossipsub": "^0.2.5",
+    "libp2p-kad-dht": "^0.18.6",
+    "libp2p-mplex": "^0.9.5",
+    "libp2p-secio": "^0.12.4",
+    "libp2p-tcp": "^0.14.4",
+    "multiaddr": "^7.4.3",
+    "peer-id": "^0.13.11",
+    "peer-info": "^0.17.5",
+    "yaml": "^1.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^13.11.1",
+    "@typescript-eslint/eslint-plugin": "^2.27.0",
+    "@typescript-eslint/parser": "^2.27.0",
+    "eslint": "^6.8.0",
+    "nodemon": "^2.0.3",
+    "typescript": "^3.8.3"
+  }
+}
