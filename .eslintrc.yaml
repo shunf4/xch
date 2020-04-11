@@ -3,6 +3,8 @@
 ---
   root: true
   parser: "@typescript-eslint/parser"
+  parserOptions:
+    project: "./tsconfig.json"
   plugins:
     - "@typescript-eslint"
   extends:
@@ -29,5 +31,6 @@
       -
         prefixWithI: always
     "@typescript-eslint/no-empty-function": off
+    "@typescript-eslint/no-floating-promises": error
   env:
     node: true

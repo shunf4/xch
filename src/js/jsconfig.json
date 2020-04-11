@@ -5,5 +5,5 @@
     "module": "commonJS",
     "target": "ES2017"
   },
-  "include": ["**/*"]
+  "include": ["**/*", "../drive.ts"]
 }

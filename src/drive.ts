@@ -2,25 +2,20 @@ import dotenv from "dotenv"
 dotenv.config()
 
 const Libp2p = require("libp2p")
-const TCP = require("libp2p-tcp")
-const SECIO = require("libp2p-secio")
-const MPLEX = require("libp2p-mplex")
-const KadDHT = require("libp2p-kad-dht")
-const Bootstrap = require("libp2p-bootstrap")
-const Gossipsub = require("libp2p-gossipsub")
+const { IdentifyService, multicodecs: IDENTIFY_PROTOCOLS } = require("libp2p/src/identify")
 const PeerInfo = require("peer-info")
 const PeerId = require("peer-id")
 
 import multiaddr from "multiaddr"
 
-import { ProfileManager } from "../profileManager"
-import { sleep } from "../xchUtil"
+import { ProfileManager } from "./profileManager"
+import { sleep } from "./xchUtil"
 import Debug from "debug"
 
-const debug = Debug("drive")
-const eventsDebug = Debug("events")
+const debug = Debug("xch:main")
+const eventsDebug = Debug("xch:events")
 
-;(async function(): Promise<void> {
+async function main(): Promise<void> {
   try {
     // ProfileManager.create({ profileDir: path.join(os.homedir(), ".xch") })
     const profileManager = await ProfileManager.create({ profileDir: "./.xch" })
@@ -49,17 +44,20 @@ const eventsDebug = Debug("events")
 
     // Replace peerInfo in identifyService
 
-    const IdentifyService = node.identifyService.constructor
-    const publicPeerInfo = new PeerInfo()
-    publicPeerInfo.id = node.peerInfo.id
-    publicPeerInfo.multiaddrs = config.overridingPublicAddressPrefixes ? config.overridingPublicAddressPrefixes.map((addrStr) => multiaddr(addrStr)) : node.peerInfo.multiaddrs
-    publicPeerInfo.protocols = node.peerInfo.protocols
+    if (node.identifyService) {
+      const publicPeerInfo = new PeerInfo(config.peerId)
+      publicPeerInfo.id = node.peerInfo.id
+      publicPeerInfo.multiaddrs = config.overridingPublicAddressPrefixes ? config.overridingPublicAddressPrefixes.map((addrStr) => multiaddr(addrStr)) : node.peerInfo.multiaddrs
+      publicPeerInfo.protocols = node.peerInfo.protocols
 
-    node.identifyService = new IdentifyService({
-      registrar: node.registrar,
-      peerInfo: publicPeerInfo,
-      protocols: node.upgrader.protocols
-    })
+      node.identifyService = new IdentifyService({
+        registrar: node.registrar,
+        peerInfo: publicPeerInfo,
+        protocols: node.upgrader.protocols
+      })
+
+      node.handle(Object.values(IDENTIFY_PROTOCOLS), node.identifyService.handleMessage)
+    }
 
     // Add listenAddrs
     config.listenAddrs.forEach((addrStr) => {
@@ -99,4 +97,7 @@ const eventsDebug = Debug("events")
       debug(`${e.constructor.name}: ${e.message}`)
     }
   }
-})()
+}
+
+/* eslint @typescript-eslint/no-floating-promises: "off" */ 
+main()

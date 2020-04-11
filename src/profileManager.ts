@@ -1,6 +1,8 @@
 import { XchLibp2pConfig } from "./config"
 import path from "path"
 import fs from "fs"
+import Debug from "debug"
+const debug = Debug("xch:profile")
 
 export class ProfilePathError extends Error {
   constructor(message?: string) {
@@ -22,9 +24,6 @@ export class ProfileManager {
   }
 
   private async _validate(): Promise<void> {
-    if (!((await fs.promises.stat(this.profileDir)).isDirectory())) {
-      // throw new ProfilePathError(`profile path error: ${this.profileDir} does not exist or is not a directory.`)
-    }
   }
 
   private static async _createDirIfNotExist(pathStr: string): Promise<void> {
@@ -48,14 +47,14 @@ export class ProfileManager {
   }
 
   private async _init(): Promise<void> {
-    ProfileManager._createDirIfNotExist(this.profileDir)
+    await ProfileManager._createDirIfNotExist(this.profileDir)
 
     // Initialize config
     // Read manual config and automatic(ends with .automatic.yaml) config files
     // Complete the config with default generated entries
     // Write default entries into another .automatic.yaml config file, named after current time
     this.configDir = path.join(this.profileDir, "config")
-    ProfileManager._createDirIfNotExist(this.configDir)
+    await ProfileManager._createDirIfNotExist(this.configDir)
 
     const filesUnderConfigDir = await fs.promises.readdir(this.configDir)
     const configFiles = filesUnderConfigDir.filter((v) => [".yaml", ".yml"].includes(path.extname(v))).map((v) => path.join(this.configDir, v))
@@ -68,9 +67,12 @@ export class ProfileManager {
 
     ;({ finalConfig: this.config, createdDefaultConfig: automaticConfig } = await XchLibp2pConfig.createFromStrings(reSortedConfig))
 
+
     if (Object.keys(automaticConfig).length) {
       await fs.promises.writeFile(path.join(this.configDir, new Date().toISOString().replace(/[.:]/g, "-") + ".automatic.yaml"), automaticConfig.toString(), {encoding: "utf-8"})
     }
+
+
   }
 
   /**

@@ -3,7 +3,7 @@ import YAML from "yaml"
 import Constant from "./constant"
 import Debug from "debug"
 
-const debug = Debug("config")
+const debug = Debug("xch:config")
 
 class ConfigError extends Error {
   constructor(message?: string) {
