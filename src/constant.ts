@@ -16,7 +16,7 @@ const Constant: {
   DefaultTransportModules: ["libp2p-tcp"],
   DefaultConnEncryptionModules: ["libp2p-secio"],
   DefaultStreamMuxerModules: ["libp2p-mplex"],
-  DefaultPeerDiscoveryModules: ["libp2p-bootstrap"],
+  DefaultPeerDiscoveryModules: ["libp2p-bootstrap", "libp2p-mdns"],
   DefaultDhtModule: "libp2p-kad-dht",
   DefaultPubsubModule: "libp2p-gossipsub",
   DefaultLibp2pConfig: {
@@ -25,11 +25,20 @@ const Constant: {
       ["bootstrap"]: {
         enabled: true,
         list: ["/dns4/sirius.moeloli.ltd/tcp/31789/p2p/12D3KooWDvYwEFqaYdq4f9S5AtavQ9E5KB8DHQVodjUD3x4k1THH"]
+      },
+      ["mdns"]: {
+        interval: 20e3,
+        enabled: true
       }
     },
     dht: {
-      enabled: true
-    }
+      enabled: true,
+      randomWalk: {
+        enabled: true,
+        interval: 10e3,
+        timeout: 10e3
+      }
+    },
   },
 
   DefaultListenAddrs: ["/ip4/0.0.0.0/tcp/31789"]

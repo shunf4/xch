@@ -1,7 +1,7 @@
 import PeerId from "peer-id"
 import YAML from "yaml"
 import Constant from "./constant"
-import Debug from "debug"
+import Debug from "debug-level"
 
 const debug = Debug("xch:config")
 
@@ -68,7 +68,7 @@ const XchLibp2pConfigDefaultGenerator: DefaultGenerator<IXchLibp2pConfig> = {
   },
 }
 
-const _stringArrayValidator = async (input: any) => {
+const _stringArrayValidator = async (input: any): Promise<string[]> => {
   if (!(input instanceof Array) || !(input as any[]).every((v) => (typeof v) === "string")) {
     throw TypeError("input is not string[]")
   }
@@ -76,7 +76,7 @@ const _stringArrayValidator = async (input: any) => {
   return input as string[]
 }
 
-const _stringValidator = async (input: any) => {
+const _stringValidator = async (input: any): Promise<string> => {
   if (!(typeof input === "string")) {
     throw TypeError("input is not string")
   }
@@ -167,7 +167,7 @@ export class XchLibp2pConfig implements IXchLibp2pConfig {
         try {
           config[k] = await XchLibp2pConfigValidatorTransformer[k](v)
         } catch (err) {
-          debug(`invalid config "${k}": ${err.message}`)
+          debug.error(`invalid value of config "${k}": ${err.message}`)
           throw err
         }
       }

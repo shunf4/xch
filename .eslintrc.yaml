@@ -31,6 +31,10 @@
       -
         prefixWithI: always
     "@typescript-eslint/no-empty-function": off
-    "@typescript-eslint/no-floating-promises": error
+    "@typescript-eslint/no-floating-promises":
+      - error
+      - 
+        ignoreVoid: true
+    "@typescript-eslint/no-explicit-any": off
   env:
     node: true

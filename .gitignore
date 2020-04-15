@@ -1,5 +1,9 @@
-/node_modules
-/.xch/
-/built/
-/*.sh
-**/*.bak
+.idea/
+.vscode/
+node_modules/
+build/
+tmp/
+temp/
+.xch/
+built/
+*.bak

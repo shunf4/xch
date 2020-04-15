@@ -1,103 +1,75 @@
 import dotenv from "dotenv"
 dotenv.config()
 
-const Libp2p = require("libp2p")
-const { IdentifyService, multicodecs: IDENTIFY_PROTOCOLS } = require("libp2p/src/identify")
-const PeerInfo = require("peer-info")
-const PeerId = require("peer-id")
+import { Profile } from "./profile"
+import { P2pLayer } from "./p2pLayer"
+import { Blockchain } from "./blockchain"
 
-import multiaddr from "multiaddr"
+import { colorForRgb, sleep } from "./xchUtil"
+import Debug from "debug-level"
 
-import { ProfileManager } from "./profileManager"
-import { sleep } from "./xchUtil"
-import Debug from "debug"
+import Yargs from "yargs"
 
 const debug = Debug("xch:main")
-const eventsDebug = Debug("xch:events")
+import Chalk from "chalk"
+debug.color = Chalk.hex("#2222FF")
+
+let profile: Profile
+//let db: Database
+//let taskQueue: TaskQueue
+let db
+let taskQueue
+let p2pLayer: P2pLayer
+let blockchain: Blockchain
+
+async function readArgv(): Promise<any> {
+  const argv: any = Yargs.default("profileDir", "./.xch").argv
+  debug.debug(`argv: ${JSON.stringify(argv)}`)
+  return argv
+}
+
+async function init(): Promise<void> {
+  const argv = await readArgv()
+
+  profile = await Profile.create({ profileDir: argv.profileDir, clear: argv.clear })
+  // db = await Database.create({ profile: profile })
+  db = null
+  // taskQueue = await TaskQueue.create()
+  taskQueue = null
+  p2pLayer = await P2pLayer.create({ profile, db, taskQueue })
+  // blockchain = await Blockchain.create({ p2pLayer, db, taskQueue })
+}
+
+async function start(): Promise<void> {
+  // await blockchain.start()
+  await p2pLayer.start()
+}
 
 async function main(): Promise<void> {
   try {
-    // ProfileManager.create({ profileDir: path.join(os.homedir(), ".xch") })
-    const profileManager = await ProfileManager.create({ profileDir: "./.xch" })
-    const config = profileManager.config
+    await init()
+    await start()
 
-    const node = await Libp2p.create({
-      modules: {
-        transport: config.transportModules.map((moduleName) => require(moduleName)),
-        connEncryption: config.connEncryptionModules.map((moduleName) => require(moduleName)),
-        streamMuxer: config.streamMuxerModules.map((moduleName) => require(moduleName)),
-        peerDiscovery: config.peerDiscoveryModules.map((moduleName) => require(moduleName)),
-        dht: require(config.dhtModule),
-        pubsub: require(config.pubsubModule),
-      },
-      config: config.libp2pConfig,
-      peerInfo: new PeerInfo(config.peerId)
-    })
+    // while (true) {
+    //   if (!taskQueue.empty()) {
 
-    node.on("peer:discovery", (peer) => {
-      eventsDebug("Discovered %s", peer.id.toB58String())
-    })
-
-    node.on("peer:connect", (peer) => {
-      eventsDebug("Connected to %s", peer.id.toB58String())
-    })
-
-    // Replace peerInfo in identifyService
-
-    if (node.identifyService) {
-      const publicPeerInfo = new PeerInfo(config.peerId)
-      publicPeerInfo.id = node.peerInfo.id
-      publicPeerInfo.multiaddrs = config.overridingPublicAddressPrefixes ? config.overridingPublicAddressPrefixes.map((addrStr) => multiaddr(addrStr)) : node.peerInfo.multiaddrs
-      publicPeerInfo.protocols = node.peerInfo.protocols
-
-      node.identifyService = new IdentifyService({
-        registrar: node.registrar,
-        peerInfo: publicPeerInfo,
-        protocols: node.upgrader.protocols
-      })
-
-      node.handle(Object.values(IDENTIFY_PROTOCOLS), node.identifyService.handleMessage)
-    }
-
-    // Add listenAddrs
-    config.listenAddrs.forEach((addrStr) => {
-      node.peerInfo.multiaddrs.add(multiaddr(addrStr))
-    })
-
-    // start
-    await node.start()
-    debug("libp2p has started!")
-
-    const addresses = node.peerInfo.multiaddrs.toArray()
-    let listenDescStr = "listening on addresses:"
-    addresses.forEach(addr => {
-      listenDescStr += `\n  ${addr.toString()}/p2p/${node.peerInfo.id.toB58String()}`
-    })
-    debug(listenDescStr)
-
-    const knownFunc = () => async (): Promise<void> => {
-      let knownAddrsStr = "known addresses:"
-      for (const [peerId, peerInfo] of node.peerStore.peers.entries()) {
-        knownAddrsStr += `\n  ${peerId}:`
-  
-        peerInfo.multiaddrs.toArray().forEach(addr => {
-          knownAddrsStr += `\n    ${addr.toString()}`
-        })
-      }
-      debug(knownAddrsStr)
-    }
-
-    setInterval(knownFunc(), 3000)
-    knownFunc()
+    //   } else {
+    //     const enqueuePromise = taskQueue.getEnqueuePromise()
+    //     const sleepPromise = sleep(10000)
+    //     await Promise.race([
+    //       enqueuePromise,
+    //       sleepPromise
+    //     ])
+    //   }
+    // }
 
   } catch (e) {
     if (e.stack) {
-      debug(`Stack(${e.constructor.name}): ${e.stack}`)
+      debug.error(`Stack(${e.constructor.name}): ${e.stack}`)
     } else {
-      debug(`${e.constructor.name}: ${e.message}`)
+      debug.error(`${e.constructor.name}: ${e.message}`)
     }
   }
 }
 
-/* eslint @typescript-eslint/no-floating-promises: "off" */ 
-main()
+void(main())

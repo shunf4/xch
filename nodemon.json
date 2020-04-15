@@ -1,3 +1,4 @@
 {
-  "ignore": ["config.yaml"]
+  "ignore": [".xch/**", "built/**"],
+  "ext": "ts,js"
 }
