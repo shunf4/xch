@@ -1,7 +1,7 @@
 import dotenv from "dotenv"
 dotenv.config()
 
-import { QueueTaskManager, ParallelismTaskManager, TaskType, Scheduler } from "./taskManager"
+import { QueueTaskManager, ParallelismTaskManager, TaskType, Scheduler, Task } from "./taskManager"
 import { TaskManagerCombination } from "./taskManagerCombination"
 import { Profile } from "./profile"
 import { P2pLayer } from "./p2pLayer"
@@ -35,19 +35,22 @@ async function init(): Promise<void> {
 
   profile = await Profile.create({ profileDir: argv.profileDir, clear: argv.clear })
 
-  taskManagers.mainQueue = await QueueTaskManager.create({shouldDeleteTaskAfterRun: false, name: "main"})
-  taskManagers.dbQueue = await QueueTaskManager.create({shouldDeleteTaskAfterRun: false, name: "db"})
+  taskManagers = new TaskManagerCombination()
+
+  taskManagers.mainQueue = await QueueTaskManager.create({shouldDeleteTaskAfterRun: true, name: "main"})
+  taskManagers.dbQueue = await QueueTaskManager.create({shouldDeleteTaskAfterRun: true, name: "db"})
   taskManagers.ordinaryQueues = [taskManagers.mainQueue, taskManagers.dbQueue]
 
   taskManagers.idleQueue = await QueueTaskManager.create({shouldDeleteTaskAfterRun: false, name: "idle"})
 
-  taskManagers.overridingQueue = await QueueTaskManager.create({shouldDeleteTaskAfterRun: false, name: "overriding"})
+  taskManagers.overridingQueue = await QueueTaskManager.create({shouldDeleteTaskAfterRun: true, name: "overriding"})
 
   taskManagers.scheduledParallelism = await ParallelismTaskManager.create({name: "schepara"})
 
   taskManagers.scheduledQueue = await QueueTaskManager.create({ shouldDeleteTaskAfterRun: false, name: "schequeue" })
 
   taskManagers.scheduler = await Scheduler.create({
+    name: "mainsche",
     scheduledAsyncFunc: async () => {
       return await Promise.all([
         taskManagers.scheduledParallelism.runAllTasks(),
@@ -63,33 +66,112 @@ async function init(): Promise<void> {
 
 async function start(): Promise<void> {
   await blockchain.start()
+  await taskManagers.scheduler.start()
+  doNotWait(sleep(3000).then(() => {
+    taskManagers.dbQueue.enqueue(new Task({
+      func: (x) => { debug.info(`dbdb ${x}`) },
+      description: "dbdb task",
+      args: ["xxx"]
+    }))
+
+    taskManagers.mainQueue.enqueue(new Task({
+      func: (x) => { debug.info(`mainmain ${x}`) },
+      description: "mainmain task",
+      args: ["xxx"]
+    }))
+
+    taskManagers.idleQueue.enqueue(new Task({
+      func: (x) => { debug.info(`idleidle ${x}`) },
+      description: "idleidle task",
+      args: ["xxx"]
+    }))
+
+    taskManagers.overridingQueue.enqueue(new Task({
+      func: (x) => { debug.info(`overover ${x}`) },
+      description: "overover task",
+      args: ["xxx"]
+    }))
+
+    taskManagers.scheduledQueue.enqueue(new Task({
+      func: async (x) => {
+        await sleep(1000)
+        debug.info(`schesche ${x}`)
+      },
+      description: "schesche task",
+      args: ["xxx"]
+    }))
+
+    taskManagers.scheduledQueue.enqueue(new Task({
+      func: async (x) => {
+        await sleep(1000)
+        debug.info(`schesche2 ${x}`)
+      },
+      description: "schesche2 task",
+      args: ["xxx"]
+    }))
+
+    taskManagers.scheduledParallelism.register(new Task({
+      func: async (x) => {
+        await sleep(1000)
+        debug.info(`schepschep ${x}`)
+      },
+      description: "schepschep task",
+      args: ["xxx"]
+    }))
+
+    taskManagers.scheduledParallelism.register(new Task({
+      func: async (x) => {
+        await sleep(1000)
+        debug.info(`schepschep2 ${x}`)
+      },
+      description: "schepschep2 task",
+      args: ["xxx"]
+    }))
+  }))
 }
 
 async function poll(): Promise<QueueTaskManager> {
-  
-  if (!taskManagers.overridingQueue.isQueueEmpty()) {
-    // If overriding queue has any task, wait for all ordinary queues to finish their current work
-    await Promise.all(taskManagers.ordinaryQueues.map(task => task.getNotRunningPromise()))
+  while (true) {
+    if (!taskManagers.overridingQueue.isQueueEmpty()) {
+      // If overriding queue has any task, wait for all ordinary queues to finish their current work
+      debug.debug("overridingQueue is not empty. waiting for all current task in ordinary queues to finish...")
+      await Promise.all(taskManagers.ordinaryQueues.map(task => task.getNotRunningPromise()))
+      debug.debug("done waiting for all current task in ordinary queues to finish")
 
-    return taskManagers.overridingQueue
-  } else {
-    // If overriding queue has no tasks, wait for one queue to be available(not running && have at least one task queued) and start a new task
-    let activatedQueue: QueueTaskManager = null
+      return taskManagers.overridingQueue
+    } else {
+      // If overriding queue has no tasks, wait for one queue(including overriding queue) to be available(not running && have at least one task queued) and start a new task
+      debug.debug("overridingQueue is empty. waiting for an available task in queues or timeout...")
+      let activatedQueue: QueueTaskManager = null
 
-    const availablePromisesAndQueues: [Promise<void>, QueueTaskManager][] = taskManagers.ordinaryQueues.map(queue => [queue.getAvailablePromise(), queue])
-    availablePromisesAndQueues.forEach(
-      ([promise, queue]) => doNotWait(promise.then(() => {
-        activatedQueue = queue
+      const availablePromisesAndQueues = taskManagers.ordinaryQueues.map(queue => [queue.getAvailablePromise(), queue] as [Promise<void>, QueueTaskManager])
+      availablePromisesAndQueues.forEach(
+        ([promise, queue]) => doNotWait(promise.then(() => {
+          activatedQueue = queue
+        }))
+      )
+
+      const sleepPromise = sleep(Constants.IdleTaskTime)
+      doNotWait(sleepPromise.then(() => {
+        activatedQueue = taskManagers.idleQueue
       }))
-    )
 
-    const sleepPromise = sleep(Constants.IdleTaskTime)
-    doNotWait(sleepPromise.then(() => {
-      activatedQueue = taskManagers.idleQueue
-    }))
-    
-    await Promise.race([...availablePromisesAndQueues, sleepPromise])
-    return activatedQueue
+      const overridingQueueAvailablePromise = taskManagers.overridingQueue.getAvailablePromise()
+      doNotWait(overridingQueueAvailablePromise.then(() => {
+        activatedQueue = taskManagers.overridingQueue
+      }))
+      
+      await Promise.race([...availablePromisesAndQueues.map(([promise, _]) => promise), overridingQueueAvailablePromise, sleepPromise])
+      debug.debug("done waiting for an available task in queues or timeout")
+
+      if (activatedQueue === taskManagers.overridingQueue) {
+        // we still need to wait for all ordinary queues to finish their current work
+        debug.debug("overridingQueue is pushed in a task while polling")
+        continue
+      }
+
+      return activatedQueue
+    }
   }
 }
 
@@ -99,10 +181,16 @@ async function main(): Promise<void> {
     await start()
 
     while (true) {
-      const activatedTaskManager = await poll();
+      const activatedTaskManager = await poll()
 
       if (activatedTaskManager === taskManagers.idleQueue) {
+        debug.debug("timed out. running all tasks in idleQueue...")
         await activatedTaskManager.runAllTasks()
+        debug.debug("done running all tasks in idleQueue")
+      } else if (activatedTaskManager === taskManagers.overridingQueue) {
+        debug.debug("running all tasks in overridingQueue...")
+        await activatedTaskManager.runAllTasks()
+        debug.debug("done running all tasks in overridingQueue")
       } else {
         await activatedTaskManager.runOneTask()
       }

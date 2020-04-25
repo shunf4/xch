@@ -16,6 +16,8 @@ import { XchLibp2pConfig } from "./config"
 import Pipe from "it-pipe"
 import ItLengthPrefixed from "it-length-prefixed"
 
+import { TaskManagerCombination } from "./taskManagerCombination"
+
 const debug = Debug("xch:p2p:main")
 debug.color = Chalk.hex("#006600")
 const eventsDebug = Debug("xch:p2p:events")
@@ -35,12 +37,13 @@ export class P2pLayer extends EventEmitter {
   node: any // Libp2p
   profile: Profile
   config: XchLibp2pConfig
+  taskManagers: TaskManagerCombination
 
   private constructor() {
     super()
   }
 
-  public static async create(options: { profile: Profile, db: any, taskQueue: any }): Promise<P2pLayer> {
+  public static async create(options: { profile: Profile, taskManagers: TaskManagerCombination }): Promise<P2pLayer> {
     const newP2pLayer = new P2pLayer()
     assignOptions(newP2pLayer, options)
 

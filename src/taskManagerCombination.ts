@@ -1,12 +1,12 @@
 import { QueueTaskManager, ParallelismTaskManager, Scheduler } from "./taskManager";
 
-export type TaskManagerCombination = {
-  mainQueue: QueueTaskManager,
-  dbQueue: QueueTaskManager,
-  ordinaryQueues: QueueTaskManager[],
-  overridingQueue: QueueTaskManager,
-  idleQueue: QueueTaskManager,
-  scheduledParallelism: ParallelismTaskManager,
-  scheduledQueue: QueueTaskManager,
-  scheduler: Scheduler,
+export class TaskManagerCombination {
+  mainQueue: QueueTaskManager = null
+  dbQueue: QueueTaskManager = null
+  ordinaryQueues: QueueTaskManager[] = null
+  overridingQueue: QueueTaskManager = null
+  idleQueue: QueueTaskManager = null
+  scheduledParallelism: ParallelismTaskManager = null
+  scheduledQueue: QueueTaskManager = null
+  scheduler: Scheduler = null
 }

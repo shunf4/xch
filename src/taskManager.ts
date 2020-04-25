@@ -237,6 +237,7 @@ export class QueueTaskManager implements ITaskManager {
     const notRunningDeferreds = this.notRunningDeferreds
     this.notRunningDeferreds = []
     notRunningDeferreds.forEach((deferred) => deferred.resolve())
+    this.debug.debug(`done resolving notRunningDeferreds(${this.notRunningDeferreds.length})`)
 
     if (this.queue.length === 0) {
       return
@@ -246,6 +247,7 @@ export class QueueTaskManager implements ITaskManager {
     const availableDeferreds = this.availableDeferreds
     this.availableDeferreds = []
     availableDeferreds.forEach((deferred) => deferred.resolve())
+    this.debug.debug(`done resolving availableDeferreds(${this.availableDeferreds.length})`)
   }
 
   getAvailablePromise(): Promise<void> {
@@ -351,6 +353,7 @@ export class QueueTaskManager implements ITaskManager {
     this.taskRunning = true
     this.debug.debug(`running task ${firstTask.description}...`)
     const result = await firstTask.run()
+    this.debug.debug(`done running task ${firstTask.description}`)
     if (this.shouldDeleteTaskAfterRun) {
       this.queue.shift()
     }
@@ -366,11 +369,13 @@ export class QueueTaskManager implements ITaskManager {
     }
 
     let i = 0
+    this.debug.debug(`running all tasks(${this.queue.length})...`)
     while (i < this.queue.length) {
       const currTask = this.queue[i]
       this.taskRunning = true
       this.debug.debug(`running task ${currTask.description}...`)
       await currTask.run()
+      this.debug.debug(`done running task ${currTask.description}`)
       if (this.shouldDeleteTaskAfterRun) {
         this.queue.shift()
       } else {
@@ -379,6 +384,7 @@ export class QueueTaskManager implements ITaskManager {
       this.taskRunning = false
     }
 
+    this.debug.debug(`done running all tasks`)
     this.resolveAndClearDeferredIfNeeded()
   }
 }
@@ -509,8 +515,11 @@ export class ParallelismTaskManager implements ITaskManager {
   }
 
   async runAllTasks(): Promise<any[]> {
+    this.debug.debug(`running all tasks(${this.tasks.length})...`)
     const promises = this.tasks.map((task) => task.run())
-    return await Promise.all(promises)
+    const result = await Promise.all(promises)
+    this.debug.debug(`done running all tasks`)
+    return result
   }
 }
 
@@ -575,8 +584,9 @@ export class Scheduler {
   }
 
   private addToTargetTaskManager(): void {
-    this.debug.debug(`add scheduled task...`)
+    this.debug.debug(`adding scheduled task...`)
     this.targetTaskManager.add(this.scheduledTask)
+    this.debug.debug(`done adding scheduled task`)
   }
 
   private onScheduledTaskFinished(): void {
