@@ -1,4 +1,5 @@
-import { Entity, Column, PrimaryColumn, Index } from "typeorm"
+import { Entity, Column, PrimaryColumn, Index, OneToMany } from "typeorm"
+import { Transaction } from "./Transaction"
 
 @Entity()
 export class Block {
@@ -24,6 +25,9 @@ export class Block {
 
   @Column()
   generator: string // pubkey multihash
+
+  @OneToMany(type => Transaction, transaction => transaction.blockHash, { cascade: true })
+  transactions: Transaction[]
 
   @Column()
   transactionsHash: string

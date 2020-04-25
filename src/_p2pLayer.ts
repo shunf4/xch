@@ -8,7 +8,7 @@ import PeerId from "peer-id"
 import multiaddr from "multiaddr"
 
 import { Profile } from "./profile"
-import { sleep, colorForRgb, defaultTo } from "./xchUtil"
+import { sleep, colorForRgb, defaultTo, assignOptions } from "./xchUtil"
 import Debug from "debug-level"
 import Chalk from "chalk"
 import { XchLibp2pConfig } from "./config"
@@ -30,23 +30,21 @@ enum PubsubTopicDataType {
 }
 
 export class P2pLayer extends EventEmitter {
+  private static Topics: [string, PubsubTopicDataType][] = [["xch:chatty", PubsubTopicDataType.String], ["xch:blockchain", PubsubTopicDataType.Json]]
+
   node: any // Libp2p
   profile: Profile
   config: XchLibp2pConfig
 
-  public static async create(options: { profile: Profile, db: any, taskQueue: any }): Promise<P2pLayer> {
-    const newP2pLayer = new P2pLayer()
-    for (const [k, v] of Object.entries(options)) {
-      newP2pLayer[k] = v
-    }
-
-    return newP2pLayer
-  }
-
-  private static Topics: [string, PubsubTopicDataType][] = [["xch:chatty", PubsubTopicDataType.String], ["xch:blockchain", PubsubTopicDataType.Json]]
-
   private constructor() {
     super()
+  }
+
+  public static async create(options: { profile: Profile, db: any, taskQueue: any }): Promise<P2pLayer> {
+    const newP2pLayer = new P2pLayer()
+    assignOptions(newP2pLayer, options)
+
+    return newP2pLayer
   }
 
   private async substitutePublicAddress(): Promise<void> {
@@ -182,8 +180,8 @@ export class P2pLayer extends EventEmitter {
     await this.listenForEvents()
     await this.subscribeForPubSub()
 
-    await this.invokeIntervalTask({ func: this.printKnownAddrs, intervalMillisec: 3000 })
-    await this.invokeIntervalTask({ func: this.broadcastTest, intervalMillisec: 3000 })
+    // await this.invokeIntervalTask({ func: this.printKnownAddrs, intervalMillisec: 3000 })
+    // await this.invokeIntervalTask({ func: this.broadcastTest, intervalMillisec: 3000 })
   }
 }
 

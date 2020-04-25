@@ -20,11 +20,22 @@ export class Profile {
   configDir: string
   config: XchLibp2pConfig
 
-  private constructor({ profileDir }: ProfileManagerOptions) {
-    this.profileDir = path.resolve(profileDir)
+  private constructor() {}
+
+  /**
+   * Creates a Profile.
+   * @param options options.profileDir: path to current profile directory.
+   */
+  static async create({ profileDir, clear }: ProfileManagerOptions): Promise<Profile> {
+    const profile = new Profile()
+    profile.profileDir = path.resolve(profileDir)
+    await profile.validate()
+    await profile.init({ clear })
+
+    return profile
   }
 
-  private async _validate(): Promise<void> {
+  private async validate(): Promise<void> {
   }
 
   private static async removeDir(pathStr: string): Promise<void> {
@@ -76,7 +87,7 @@ export class Profile {
     }
   }
 
-  private async _init({ clear }: { clear: string }): Promise<void> {
+  private async init({ clear }: { clear: string }): Promise<void> {
     if (clear && (clear === "all" || clear === "profile")) {
       await Profile.removeDir(this.profileDir)
     }
@@ -116,17 +127,5 @@ export class Profile {
     if (Object.keys(automaticConfig).length) {
       await fs.promises.writeFile(path.join(this.configDir, new Date().toISOString().replace(/[.:]/g, "-") + ".automatic.yaml"), automaticConfig.toString(), {encoding: "utf-8"})
     }
-  }
-
-  /**
-   * Creates a Profile.
-   * @param options options.profileDir: path to current profile directory.
-   */
-  static async create(options: ProfileManagerOptions): Promise<Profile> {
-    const profile = new Profile(options)
-    await profile._validate()
-    await profile._init({ clear: options.clear })
-
-    return profile
   }
 }

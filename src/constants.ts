@@ -1,17 +1,6 @@
 import Libp2pCrypto from "libp2p-crypto"
 
-const Constant: {
-  DefaultPeerIdKeyType: Libp2pCrypto.KeyType,
-  DefaultTransportModules: string[],
-  DefaultConnEncryptionModules: string[],
-  DefaultStreamMuxerModules: string[],
-  DefaultPeerDiscoveryModules: string[],
-  DefaultDhtModule: string,
-  DefaultPubsubModule: string,
-  DefaultLibp2pConfig: any,
-
-  DefaultListenAddrs: string[],
-} = {
+const Constants = {
   DefaultPeerIdKeyType: "Ed25519",
   DefaultTransportModules: ["libp2p-tcp"],
   DefaultConnEncryptionModules: ["libp2p-secio"],
@@ -39,10 +28,16 @@ const Constant: {
         timeout: 10e3
       }
     },
+    dailer: {
+      dialTimeout: 3000
+    }
   },
 
-  DefaultListenAddrs: ["/ip4/0.0.0.0/tcp/31789"]
+  DefaultListenAddrs: ["/ip4/0.0.0.0/tcp/31789"],
+
+  IdleTaskTime: 6000,
+  ScheduledTaskTime: 10000
 }
 
-export default Constant
+export default Constants
 

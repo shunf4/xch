@@ -1,7 +1,8 @@
 import PeerId from "peer-id"
 import YAML from "yaml"
-import Constant from "./constant"
+import Constants from "./constants"
 import Debug from "debug-level"
+import { KeyType } from "libp2p-crypto"
 
 const debug = Debug("xch:config")
 
@@ -40,31 +41,31 @@ type ValidatorTransformer<T> = {
 const XchLibp2pConfigDefaultGenerator: DefaultGenerator<IXchLibp2pConfig> = {
   overridingPublicAddressPrefixes: async () => null,
   peerId: async () => {
-    return await PeerId.create({keyType: Constant.DefaultPeerIdKeyType})
+    return await PeerId.create({keyType: Constants.DefaultPeerIdKeyType as KeyType})
   },
   transportModules: async () => {
-    return Constant.DefaultTransportModules.slice()
+    return Constants.DefaultTransportModules.slice()
   },
   connEncryptionModules: async () => {
-    return Constant.DefaultConnEncryptionModules.slice()
+    return Constants.DefaultConnEncryptionModules.slice()
   },
   streamMuxerModules: async () => {
-    return Constant.DefaultStreamMuxerModules.slice()
+    return Constants.DefaultStreamMuxerModules.slice()
   },
   peerDiscoveryModules: async () => {
-    return Constant.DefaultPeerDiscoveryModules.slice()
+    return Constants.DefaultPeerDiscoveryModules.slice()
   },
   dhtModule: async () => {
-    return Constant.DefaultDhtModule
+    return Constants.DefaultDhtModule
   },
   pubsubModule: async () => {
-    return Constant.DefaultPubsubModule
+    return Constants.DefaultPubsubModule
   },
   libp2pConfig: async () => {
-    return JSON.parse(JSON.stringify(Constant.DefaultLibp2pConfig))
+    return JSON.parse(JSON.stringify(Constants.DefaultLibp2pConfig))
   },
   listenAddrs: async () => {
-    return Constant.DefaultListenAddrs.slice()
+    return Constants.DefaultListenAddrs.slice()
   },
 }
 

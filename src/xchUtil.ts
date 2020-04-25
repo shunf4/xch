@@ -19,3 +19,13 @@ export function defaultTo(defaultValue: any): (sth: any) => any {
 
   return partialDefaultTo
 }
+
+export function doNotWait<T>(promise: Promise<T>): void {
+  void(promise)
+}
+
+export function assignOptions(obj: any, options: any): void {
+  for (const [k, v] of Object.entries(options)) {
+    obj[k] = v
+  }
+}

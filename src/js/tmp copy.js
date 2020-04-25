@@ -1,8 +1,6 @@
 const Pipe = require("it-pipe")
-const ItPushable = require("it-pushable")
 const ItLengthPrefixed = require("it-length-prefixed")
 const { EventEmitter } = require("events")
-const { inspect } = require("util")
 
 const Debug = require("debug-level")
 const debug = Debug("xch:tmp")
@@ -20,30 +18,10 @@ function stdinToStream(stream) {
   )
 }
 
-function writerToStream(pushable, stream) {
-  Pipe(
-    pushable,
-    // Encode with length prefix (so receiving side knows how much data is coming)
-    ItLengthPrefixed.encode(),
-    // Write to the stream (the sink)
-    stream.sink
-  )
-}
-
 function streamToConsole(stream) {
   Pipe(
     // Read from the stream (the source)
     stream.source,
-    // Print raw
-    function(source) {
-      const ret = (async function * () {
-        for await (const chunk of source) {
-          console.log(`raw: ${inspect(chunk.slice())}`)
-          yield chunk
-        }
-      })()
-      return ret
-    },
     // Decode length-prefixed data
     ItLengthPrefixed.decode(),
     // Sink function
@@ -82,9 +60,5 @@ stream.on("data", function(chunk) {
   }
 })
 
-const writer = ItPushable()
-writerToStream(writer, stream)
+stdinToStream(stream)
 streamToConsole(stream)
-
-writer.push(Buffer.from("xyz"))
-
