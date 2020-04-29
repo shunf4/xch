@@ -18,5 +18,8 @@ export class Blockchain {
 
   async start(): Promise<void> {
     await this.p2pLayer.start()
+
+    //await this.initializeGenesisBlock()
+    //await this.initializeBlockchain()
   }
 }

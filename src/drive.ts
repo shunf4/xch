@@ -1,6 +1,11 @@
 import dotenv from "dotenv"
 dotenv.config()
 
+import path from "path"
+
+import "reflect-metadata"
+import { createConnection, getConnectionOptions } from "typeorm"
+
 import { QueueTaskManager, ParallelismTaskManager, TaskType, Scheduler, Task } from "./taskManager"
 import { TaskManagerCombination } from "./taskManagerCombination"
 import { Profile } from "./profile"
@@ -16,6 +21,7 @@ import Yargs from "yargs"
 const debug = Debug("xch:main")
 import Chalk from "chalk"
 import { promises } from "dns"
+import { addTaskManagerDebugTask } from "./xchDebugUtil"
 debug.color = Chalk.hex("#2222FF")
 
 let profile: Profile
@@ -30,10 +36,20 @@ async function readArgv(): Promise<any> {
   return argv
 }
 
+async function initDb({ profile }: { profile: Profile }): Promise<void> {
+  const connectionOptions = await getConnectionOptions()
+  Object.assign(connectionOptions, {
+    database: path.join(profile.profileDir, "database.db")
+  })
+  await createConnection(connectionOptions)
+}
+
 async function init(): Promise<void> {
   const argv = await readArgv()
 
   profile = await Profile.create({ profileDir: argv.profileDir, clear: argv.clear })
+
+  await initDb({ profile })
 
   taskManagers = new TaskManagerCombination()
 
@@ -67,67 +83,7 @@ async function init(): Promise<void> {
 async function start(): Promise<void> {
   await blockchain.start()
   await taskManagers.scheduler.start()
-  doNotWait(sleep(3000).then(() => {
-    taskManagers.dbQueue.enqueue(new Task({
-      func: (x) => { debug.info(`dbdb ${x}`) },
-      description: "dbdb task",
-      args: ["xxx"]
-    }))
-
-    taskManagers.mainQueue.enqueue(new Task({
-      func: (x) => { debug.info(`mainmain ${x}`) },
-      description: "mainmain task",
-      args: ["xxx"]
-    }))
-
-    taskManagers.idleQueue.enqueue(new Task({
-      func: (x) => { debug.info(`idleidle ${x}`) },
-      description: "idleidle task",
-      args: ["xxx"]
-    }))
-
-    taskManagers.overridingQueue.enqueue(new Task({
-      func: (x) => { debug.info(`overover ${x}`) },
-      description: "overover task",
-      args: ["xxx"]
-    }))
-
-    taskManagers.scheduledQueue.enqueue(new Task({
-      func: async (x) => {
-        await sleep(1000)
-        debug.info(`schesche ${x}`)
-      },
-      description: "schesche task",
-      args: ["xxx"]
-    }))
-
-    taskManagers.scheduledQueue.enqueue(new Task({
-      func: async (x) => {
-        await sleep(1000)
-        debug.info(`schesche2 ${x}`)
-      },
-      description: "schesche2 task",
-      args: ["xxx"]
-    }))
-
-    taskManagers.scheduledParallelism.register(new Task({
-      func: async (x) => {
-        await sleep(1000)
-        debug.info(`schepschep ${x}`)
-      },
-      description: "schepschep task",
-      args: ["xxx"]
-    }))
-
-    taskManagers.scheduledParallelism.register(new Task({
-      func: async (x) => {
-        await sleep(1000)
-        debug.info(`schepschep2 ${x}`)
-      },
-      description: "schepschep2 task",
-      args: ["xxx"]
-    }))
-  }))
+  addTaskManagerDebugTask({ taskManagers, debug })
 }
 
 async function poll(): Promise<QueueTaskManager> {
@@ -196,9 +152,9 @@ async function main(): Promise<void> {
       }
     }
 
-  } catch (e) {
+  } catch (err) {
     if (e.stack) {
-      debug.error(`Stack(${e.constructor.name}): ${e.stack}`)
+      debug.error(`Exception occurred(${e.constructor.name}). Stack: ${e.stack}`)
     } else {
       debug.error(`${e.constructor.name}: ${e.message}`)
     }

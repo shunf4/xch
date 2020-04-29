@@ -1,0 +1,14 @@
+// For ESLint. ESLint will complain in every .js/.ts file not included in tsconfig.json.
+
+{
+   "extends": "./tsconfig.json",
+   "include": [
+     "jest.config.js",
+     "ormconfig.js",
+     "src/**/*"
+   ],
+   "exclude": [
+     "src/types/*"
+   ]
+ }
+ 

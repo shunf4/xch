@@ -3,15 +3,9 @@ import YAML from "yaml"
 import Constants from "./constants"
 import Debug from "debug-level"
 import { KeyType } from "libp2p-crypto"
+import { ConfigValueError, ConfigTypeError } from "./errors"
 
 const debug = Debug("xch:config")
-
-class ConfigError extends Error {
-  constructor(message?: string) {
-    super(message)
-  }
-}
-
 
 interface IXchLibp2pConfig {
   overridingPublicAddressPrefixes: string[] | null,
@@ -33,8 +27,8 @@ type DefaultGenerator<T> = {
 }
 
 
-type ValidatorTransformer<T> = {
-  [P in keyof T]: (toBeValidated: any) => Promise<T[P]>
+type Normalizer<T> = {
+  [P in keyof T]: (toBeNormalized: any) => Promise<T[P]>
 }
 
 
@@ -69,26 +63,26 @@ const XchLibp2pConfigDefaultGenerator: DefaultGenerator<IXchLibp2pConfig> = {
   },
 }
 
-const _stringArrayValidator = async (input: any): Promise<string[]> => {
+const _stringArrayNormalizer = async (input: any): Promise<string[]> => {
   if (!(input instanceof Array) || !(input as any[]).every((v) => (typeof v) === "string")) {
-    throw TypeError("input is not string[]")
+    throw new ConfigTypeError("input is not string[]")
   }
 
   return input as string[]
 }
 
-const _stringValidator = async (input: any): Promise<string> => {
+const _stringNormalizer = async (input: any): Promise<string> => {
   if (!(typeof input === "string")) {
-    throw TypeError("input is not string")
+    throw new ConfigTypeError("input is not string")
   }
 
   return input as string
 }
 
-const XchLibp2pConfigValidatorTransformer: ValidatorTransformer<IXchLibp2pConfig> = {
+const XchLibp2pConfigNormalizer: Normalizer<IXchLibp2pConfig> = {
   overridingPublicAddressPrefixes: async (input: any) => {
     if (input === undefined) {
-      throw TypeError("input is undefined or null")
+      throw new ConfigTypeError("input is undefined or null")
     }
 
     if (input === null) {
@@ -96,7 +90,7 @@ const XchLibp2pConfigValidatorTransformer: ValidatorTransformer<IXchLibp2pConfig
     }
 
     if (!(input instanceof Array) || !(input as any[]).every((v) => (typeof v) === "string")) {
-      throw TypeError("input is not string[]")
+      throw new ConfigTypeError("input is not string[]")
     }
 
     return input as string[]
@@ -104,30 +98,30 @@ const XchLibp2pConfigValidatorTransformer: ValidatorTransformer<IXchLibp2pConfig
 
   peerId: async (input: any) => {
     if (input === null || input === undefined) {
-      throw TypeError("input is undefined or null")
+      throw new ConfigTypeError("input is undefined or null")
     }
 
     const peerId = await PeerId.createFromJSON(input as PeerId.JSONPeerId)
     if (!peerId.isValid()) {
-      throw new ConfigError(`peerId invalid`)
+      throw new ConfigTypeError(`peerId invalid`)
     }
     
     return peerId
   },
 
-  transportModules: _stringArrayValidator,
-  connEncryptionModules: _stringArrayValidator,
-  streamMuxerModules: _stringArrayValidator,
-  peerDiscoveryModules: _stringArrayValidator,
-  dhtModule: _stringValidator,
-  pubsubModule: _stringValidator,
+  transportModules: _stringArrayNormalizer,
+  connEncryptionModules: _stringArrayNormalizer,
+  streamMuxerModules: _stringArrayNormalizer,
+  peerDiscoveryModules: _stringArrayNormalizer,
+  dhtModule: _stringNormalizer,
+  pubsubModule: _stringNormalizer,
   libp2pConfig: async (input: any) => {
     if (input === null || input === undefined) {
-      throw TypeError("input is undefined or null")
+      throw new ConfigTypeError("input is undefined or null")
     }
     return input
   },
-  listenAddrs: _stringArrayValidator,
+  listenAddrs: _stringArrayNormalizer,
 }
 
 
@@ -153,12 +147,15 @@ export class XchLibp2pConfig implements IXchLibp2pConfig {
     }> {
     const config = new XchLibp2pConfig()
     const createdDefaultConfig = new XchLibp2pConfig()
-    const loadedConfigs = strs.map((str) => YAML.parse(str))
+    const loadedConfigs = strs.map((str) => {
+      const result = YAML.parse(str)
+      return result ? result : {}
+    })
 
     for (const currConfig of loadedConfigs) {
       for (const [k, v] of Object.entries(currConfig)) {
-        if (XchLibp2pConfigValidatorTransformer[k] === undefined) {
-          throw new ConfigError(`invalid configuration key: ${k}`)
+        if (XchLibp2pConfigNormalizer[k] === undefined) {
+          throw new ConfigTypeError(`invalid configuration key: ${k}`)
         }
 
         if (Object.prototype.hasOwnProperty.call(config, k)) {
@@ -166,7 +163,7 @@ export class XchLibp2pConfig implements IXchLibp2pConfig {
         }
 
         try {
-          config[k] = await XchLibp2pConfigValidatorTransformer[k](v)
+          config[k] = await XchLibp2pConfigNormalizer[k](v)
         } catch (err) {
           debug.error(`invalid value of config "${k}": ${err.message}`)
           throw err

@@ -46,8 +46,16 @@ export class Task {
   }
 
   async run(): Promise<any> {
-    const result = this.func(...this.args)
-    return await Promise.resolve(result) // forcily convert result to a Promise
+    try {
+      const result = this.func(...this.args)
+      return await Promise.resolve(result) // forcily convert result to a Promise
+    } catch (err) {
+      if (e.stack) {
+        debug.error(`Exception occurred(${e.constructor.name}) when executing task ${this.description}. Stack: ${e.stack}`)
+      } else {
+        debug.error(`Exception occurred(${e.constructor.name}) when executing task ${this.description}: ${e.message}`)
+      }
+    }
   }
 }
 
@@ -571,7 +579,7 @@ export class Scheduler {
     if (this._isRunning) {
       try {
         this.targetTaskManager.invalidate(this.scheduledTask)
-      } catch (e) {
+      } catch (err) {
         if (!(e instanceof TaskNotFoundError)) {
           throw e
         }

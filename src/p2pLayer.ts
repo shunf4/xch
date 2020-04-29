@@ -17,6 +17,10 @@ import Pipe from "it-pipe"
 import ItLengthPrefixed from "it-length-prefixed"
 
 import { TaskManagerCombination } from "./taskManagerCombination"
+import { Task } from "./taskManager"
+import { PeerInfoEntity } from "./entity/PeerInfoEntity"
+import { getConnection } from "typeorm"
+import { MultiaddrEntity } from "./entity/MultiaddrEntity"
 
 const debug = Debug("xch:p2p:main")
 debug.color = Chalk.hex("#006600")
@@ -127,19 +131,49 @@ export class P2pLayer extends EventEmitter {
     this.node.pubsub.publish("xch:chatty", Buffer.from(`${this.config.peerId.toB58String().substr(-5)}: broadcast genesis block { timestamp: 2020/04/15T10:00:00, height: 0, hash: 000... }`))
   }
 
-  private async invokeIntervalTask({ func, that = this, intervalMillisec, now = true }: { func: (...args: any[]) => void, that?: any, intervalMillisec: number, now?: boolean }): Promise<void> {
-    setInterval(func.bind(that), intervalMillisec)
-    if (now) {
-      void(func.bind(that)())
-    }
+  private async pingAllPeers(): Promise<void> {
+    const pingPromises = Array.from(this.node.peerStore.peers.entries()).map(([peerId, peerInfo]: [PeerId, PeerInfo]) => this.node.ping(peerInfo))
+
+    await Promise.all(pingPromises)
+    debug.info(`scheduled pinged ${pingPromises.length} peers`)
   }
 
-  private async invokeTimeoutTask({ func, that = this, timeoutMillisec }: { func: (...args: any[]) => void, that: any, timeoutMillisec: number }): Promise<void> {
-    setTimeout(func.bind(that), timeoutMillisec)
+  private async saveAllPeers(): Promise<void> {
+    await getConnection()
+      .createQueryBuilder()
+      .delete()
+      .from(PeerInfoEntity)
+      .execute()
+
+    await getConnection()
+      .createQueryBuilder()
+      .delete()
+      .from(MultiaddrEntity)
+      .execute()
+
+    debug.info(`scheduled cleared old peers`)
+
+    const savePeerPromises = Array.from(this.node.peerStore.peers.values()).map(
+      (peerInfo: PeerInfo) => (async (): Promise<void> => {
+        const peerInfoEntity = await PeerInfoEntity.fromPeerInfo(peerInfo)
+        await peerInfoEntity.save()
+      })()
+    )
+
+    await Promise.all(savePeerPromises)
+    debug.info(`scheduled saved ${savePeerPromises.length} peers`)
   }
 
-  private async invokeTimeoutTasks(): Promise<void> {
-    // setTimeout(this.broadcastTest.bind(this), 3000)
+  private async loadAllPeers(): Promise<void> {
+    const peerInfoEntities = await PeerInfoEntity.find({
+      relations: ["multiaddrs"]
+    })
+
+    const peerInfos = await Promise.all(peerInfoEntities.map(peerInfoEntity => peerInfoEntity.toPeerInfo()))
+
+    peerInfos.forEach(peerInfo => {
+      this.node.peerStore.put(peerInfo)
+    })
   }
 
   public async start(): Promise<void> {
@@ -169,6 +203,9 @@ export class P2pLayer extends EventEmitter {
       this.node.peerInfo.multiaddrs.add(multiaddr(addrStr))
     })
 
+    // Add saved peers
+    await this.loadAllPeers()
+
     // Add protocol handlers
     await this.node.handle("/test", ({ stream }) => {
       Pipe(
@@ -183,8 +220,20 @@ export class P2pLayer extends EventEmitter {
     await this.listenForEvents()
     await this.subscribeForPubSub()
 
-    // await this.invokeIntervalTask({ func: this.printKnownAddrs, intervalMillisec: 3000 })
-    // await this.invokeIntervalTask({ func: this.broadcastTest, intervalMillisec: 3000 })
+    this.taskManagers.scheduledParallelism.register(new Task({
+      func: this.printKnownAddrs.bind(this),
+      description: "printKnownAddrs",
+      args: []
+    }))
+
+    this.taskManagers.scheduledParallelism.register(this.pingAllPeers.bind(this))
+    this.taskManagers.scheduledParallelism.register(this.saveAllPeers.bind(this))
+
+    this.taskManagers.scheduledParallelism.register(new Task({
+      func: this.broadcastTest.bind(this),
+      description: "broadcastTest",
+      args: []
+    }))
   }
 }
 
