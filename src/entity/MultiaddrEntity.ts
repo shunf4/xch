@@ -16,9 +16,9 @@ export class MultiaddrEntity {
   }
 
   public static async fromObject({ peerInfoId, multiaddrString }: { peerInfoId: string, multiaddrString: string }): Promise<MultiaddrEntity> {
-    const newObject = new MultiaddrEntity()
-    newObject.peerInfoId = peerInfoId
-    newObject.addrString = multiaddrString
-    return newObject
+    const newObj = new MultiaddrEntity()
+    newObj.peerInfoId = peerInfoId
+    newObj.addrString = multiaddrString
+    return newObj
   }
 }

@@ -41,5 +41,6 @@
       -
         allowDestructuring: true
         allowedNames: ['that']
+    "prefer-rest-params": off
   env:
     node: true

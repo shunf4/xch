@@ -1,0 +1,122 @@
+import dotenv from "dotenv"
+dotenv.config()
+
+import path from "path"
+import fs from "fs"
+
+import "reflect-metadata"
+import { createConnection, getConnectionOptions } from "typeorm"
+
+import { QueueTaskManager, ParallelismTaskManager, TaskType, Scheduler, Task } from "./taskManager"
+import { TaskManagerCombination } from "./taskManagerCombination"
+import { Profile } from "./profile"
+import { P2pLayer } from "./p2pLayer"
+import { Blockchain } from "./blockchain"
+
+import constants from "./constants"
+import { sleep, doNotWait } from "./xchUtil"
+import Debug from "debug-level"
+
+import Yargs from "yargs"
+
+const debug = Debug("xch:main")
+import chalk from "chalk"
+import { promises } from "dns"
+import { addTaskManagerDebugTask } from "./xchDebugUtil"
+import { Block } from "./entity/Block"
+debug.color = chalk.hex("#2222FF")
+
+let profile: Profile
+let taskManagers: TaskManagerCombination
+let p2pLayer: P2pLayer
+let blockchain: Blockchain
+
+
+async function readArgv(): Promise<any> {
+  const argv: any = Yargs.default("profileDir", "./.xch").argv
+  debug.debug(`argv: ${JSON.stringify(argv)}`)
+  return argv
+}
+
+async function initDb({ profile }: { profile: Profile }): Promise<void> {
+  const connectionOptions = await getConnectionOptions()
+  Object.assign(connectionOptions, {
+    database: path.join(profile.profileDir, "database.db")
+  })
+  await createConnection(connectionOptions)
+}
+
+async function init(): Promise<void> {
+  const argv = await readArgv()
+
+  profile = await Profile.create({ profileDir: argv.profileDir, clear: argv.clear })
+
+  await initDb({ profile })
+
+  taskManagers = new TaskManagerCombination()
+
+  taskManagers.scheduler = await Scheduler.create({
+    name: "mainsche",
+    scheduledAsyncFunc: async () => {
+      return await Promise.all([
+      ])
+    },
+    targetTaskManager: taskManagers.overridingQueue
+  })
+
+  p2pLayer = await P2pLayer.create({ profile, taskManagers })
+  blockchain = await Blockchain.create({ p2pLayer, taskManagers })
+}
+
+async function start(): Promise<void> {
+}
+
+async function main(): Promise<void> {
+  try {
+    await init()
+    await start()
+
+    const emptyDataStr = "0000000000000000"
+    const genesisBlock = await Block.fromObject({
+      hash: emptyDataStr,
+      version: 1,
+      timestamp: new Date(),
+      height: 0,
+      prevHash: emptyDataStr,
+      mineReward: 0,
+      generator: profile.config.peerId.toB58String(),
+      transactions: [],
+      stateHash: emptyDataStr,
+      signature: emptyDataStr,
+      transactionsHash: emptyDataStr,
+      accountStateSnapshots: []
+    })
+
+    {
+      const f = await fs.promises.open("./testGenesisBlock.json", "w")
+      await f.writeFile(JSON.stringify(genesisBlock, null, 2), {
+        encoding: "utf-8"
+      })
+      await f.close()
+    }
+
+    {
+      const f = await fs.promises.open("./testGenesisBlock.json", "r")
+      const x = JSON.parse(await f.readFile({
+        encoding: "utf-8"
+      }))
+      console.log(x)
+      debug.info(x)
+      console.log(await Block.fromObject(x))
+    }
+
+  } catch (err) {
+    if (err.stack) {
+      debug.error(`Exception occurred(${err.constructor.name}). Stack: ${err.stack}`)
+    } else {
+      debug.error(`${err.constructor.name}: ${err.message}`)
+    }
+  }
+}
+
+doNotWait(main())

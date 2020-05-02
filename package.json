@@ -10,7 +10,10 @@
     "bs": "tsc && node built/drive.js",
     "mon": "tsc && nodemon built/drive.js",
     "lint": "eslint --ext .ts ./src",
-    "tmp": "node src/js/tmp.js"
+    "tmp": "node src/js/tmp.js",
+    "ttmp": "ts-node src/ttmp.ts",
+    "gengen": "ts-node src/generateGenesisBlockJson.ts",
+    "genid": "ts-node src/generatePeerId.ts"
   },
   "author": "",
   "license": "ISC",

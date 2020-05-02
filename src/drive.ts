@@ -5,24 +5,24 @@ import path from "path"
 
 import "reflect-metadata"
 import { createConnection, getConnectionOptions } from "typeorm"
+import chalk from "chalk"
+import yargs from "yargs"
+import Debug from "debug-level"
 
 import { QueueTaskManager, ParallelismTaskManager, TaskType, Scheduler, Task } from "./taskManager"
 import { TaskManagerCombination } from "./taskManagerCombination"
 import { Profile } from "./profile"
 import { P2pLayer } from "./p2pLayer"
 import { Blockchain } from "./blockchain"
-
-import Constants from "./constants"
+import constants from "./constants"
 import { sleep, doNotWait } from "./xchUtil"
-import Debug from "debug-level"
 
-import Yargs from "yargs"
+
 
 const debug = Debug("xch:main")
-import Chalk from "chalk"
 import { promises } from "dns"
 import { addTaskManagerDebugTask } from "./xchDebugUtil"
-debug.color = Chalk.hex("#2222FF")
+debug.color = chalk.hex("#2222FF")
 
 let profile: Profile
 let taskManagers: TaskManagerCombination
@@ -31,7 +31,7 @@ let blockchain: Blockchain
 
 
 async function readArgv(): Promise<any> {
-  const argv: any = Yargs.default("profileDir", "./.xch").argv
+  const argv: any = yargs.default("profileDir", "./.xch").argv
   debug.debug(`argv: ${JSON.stringify(argv)}`)
   return argv
 }
@@ -91,7 +91,7 @@ async function poll(): Promise<QueueTaskManager> {
     if (!taskManagers.overridingQueue.isQueueEmpty()) {
       // If overriding queue has any task, wait for all ordinary queues to finish their current work
       debug.debug("overridingQueue is not empty. waiting for all current task in ordinary queues to finish...")
-      await Promise.all(taskManagers.ordinaryQueues.map(task => task.getNotRunningPromise()))
+      await Promise.all(taskManagers.ordinaryQueues.map(task => task.generateNotRunningPromise()))
       debug.debug("done waiting for all current task in ordinary queues to finish")
 
       return taskManagers.overridingQueue
@@ -100,19 +100,19 @@ async function poll(): Promise<QueueTaskManager> {
       debug.debug("overridingQueue is empty. waiting for an available task in queues or timeout...")
       let activatedQueue: QueueTaskManager = null
 
-      const availablePromisesAndQueues = taskManagers.ordinaryQueues.map(queue => [queue.getAvailablePromise(), queue] as [Promise<void>, QueueTaskManager])
+      const availablePromisesAndQueues = taskManagers.ordinaryQueues.map(queue => [queue.generateAvailablePromise(), queue] as [Promise<void>, QueueTaskManager])
       availablePromisesAndQueues.forEach(
         ([promise, queue]) => doNotWait(promise.then(() => {
           activatedQueue = queue
         }))
       )
 
-      const sleepPromise = sleep(Constants.IdleTaskTime)
+      const sleepPromise = sleep(constants.IdleTaskTime)
       doNotWait(sleepPromise.then(() => {
         activatedQueue = taskManagers.idleQueue
       }))
 
-      const overridingQueueAvailablePromise = taskManagers.overridingQueue.getAvailablePromise()
+      const overridingQueueAvailablePromise = taskManagers.overridingQueue.generateAvailablePromise()
       doNotWait(overridingQueueAvailablePromise.then(() => {
         activatedQueue = taskManagers.overridingQueue
       }))
@@ -153,10 +153,10 @@ async function main(): Promise<void> {
     }
 
   } catch (err) {
-    if (e.stack) {
-      debug.error(`Exception occurred(${e.constructor.name}). Stack: ${e.stack}`)
+    if (err.stack) {
+      debug.error(`Exception occurred(${err.constructor.name}). Stack: ${err.stack}`)
     } else {
-      debug.error(`${e.constructor.name}: ${e.message}`)
+      debug.error(`${err.constructor.name}: ${err.message}`)
     }
   }
 }

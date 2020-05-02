@@ -50,10 +50,10 @@ export class Task {
       const result = this.func(...this.args)
       return await Promise.resolve(result) // forcily convert result to a Promise
     } catch (err) {
-      if (e.stack) {
-        debug.error(`Exception occurred(${e.constructor.name}) when executing task ${this.description}. Stack: ${e.stack}`)
+      if (err.stack) {
+        debug.error(`Exception occurred(${err.constructor.name}) when executing task ${this.description}. Stack: ${err.stack}`)
       } else {
-        debug.error(`Exception occurred(${e.constructor.name}) when executing task ${this.description}: ${e.message}`)
+        debug.error(`Exception occurred(${err.constructor.name}) when executing task ${this.description}: ${err.message}`)
       }
     }
   }
@@ -258,7 +258,7 @@ export class QueueTaskManager implements ITaskManager {
     this.debug.debug(`done resolving availableDeferreds(${this.availableDeferreds.length})`)
   }
 
-  getAvailablePromise(): Promise<void> {
+  generateAvailablePromise(): Promise<void> {
     const deferred: DeferredPromise<void> = createDeferredPromise()
     this.availableDeferreds.push(deferred)
     this.resolveAndClearDeferredIfNeeded()
@@ -266,7 +266,7 @@ export class QueueTaskManager implements ITaskManager {
     return deferred.promise
   }
 
-  getNotRunningPromise(): Promise<void> {
+  generateNotRunningPromise(): Promise<void> {
     const deferred: DeferredPromise<void> = createDeferredPromise()
     this.notRunningDeferreds.push(deferred)
     this.resolveAndClearDeferredIfNeeded()
@@ -580,8 +580,8 @@ export class Scheduler {
       try {
         this.targetTaskManager.invalidate(this.scheduledTask)
       } catch (err) {
-        if (!(e instanceof TaskNotFoundError)) {
-          throw e
+        if (!(err instanceof TaskNotFoundError)) {
+          throw err
         }
       }
       this._isRunning = false

@@ -1,6 +1,7 @@
 import Ansi256Colors from "ansi-256-colors"
 import __ from "underscore"
 import { RuntimeLogicError } from "./errors"
+import { Arguments } from "yargs"
 
 export async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -31,16 +32,64 @@ export function assignOptions(obj: any, options: any): void {
   }
 }
 
-export function assertType(sth: any, type: string, errorConstructor: { new(...args): Error }, sthStr: string): void {
+export function assertType(sth: any, type: string, errorConstructor: { new(...args): Error }, sthStr: string): void
+export function assertType(sth: any, types: string[], errorConstructor: { new(...args): Error }, sthStr: string): void
+export function assertType(sth: any, typeSth: string | string[], errorConstructor: { new(...args): Error }, sthStr: string): void {
   const sthType = typeof sth
-  if (sthType !== type) {
-    throw new errorConstructor(`typeof ${sthStr} is ${sthType} (should be ${type})`)
+  let types: string[]
+  if (typeof typeSth === "string") {
+    types = [typeSth]
+  } else {
+    types = typeSth
+  }
+
+  if (!(types.includes(sthType))) {
+    throw new errorConstructor(`typeof ${sthStr} is ${sthType} (should be one of type(s): ${types.join(", ")})`)
   }
 }
 
-export function assertInstanceOf(obj: any, clazz: any, errorConstructor: { new(...args): Error }, sthStr: string): void {
-  if (!(obj instanceof clazz)) {
-    throw new errorConstructor(`${sthStr} is not instanceof ${clazz.name} (it is a ${obj.constructor.name})`)
+export function assertInstanceOf(obj: any, clazz: any, errorConstructor: { new(...args): Error }, sthStr: string): void
+export function assertInstanceOf(obj: any, clazzes: any[], errorConstructor: { new(...args): Error }, sthStr: string): void
+export function assertInstanceOf(obj: any, clazzSth: any, errorConstructor: { new(...args): Error }, sthStr: string): void {
+  let clazzes: any[]
+  if (Array.isArray(clazzSth)) {
+    clazzes = clazzSth
+  } else {
+    clazzes = [clazzSth]
+  }
+
+  let match = false
+  for (const clazz of clazzes) {
+    if ((obj instanceof clazz) || (clazz === Array && Array.isArray(obj))) {
+      match = true
+      break
+    }
+  }
+
+  if (!match) {
+    throw new errorConstructor(`${sthStr} is not instanceof one of class(es): ${clazzes.map(clazz => clazz.name).map(clazzName => clazzName ? clazzName : "<empty>").join(", ")} (it is a ${obj?.constructor?.name})`)
+  }
+}
+
+export function assertTypeOrInstanceOf(sth: any, typeOrClass: any, errorConstructor: { new(...args): Error }, sthStr: string): void {
+  let typeOrClassArray: any[]
+  if (Array.isArray(typeOrClass)) {
+    typeOrClassArray = typeOrClass
+  } else {
+    typeOrClassArray = [typeOrClass]
+  }
+
+  const types = typeOrClassArray.filter(typeOrClass => typeof typeOrClass === "string")
+  const clazzes = typeOrClassArray.filter(typeOrClass => typeof typeOrClass !== "string")
+
+  try {
+    assertType(sth, types, errorConstructor, sthStr)
+  } catch (err) {
+    if (!(err instanceof errorConstructor)) {
+      throw err
+    } else {
+      assertInstanceOf(sth, clazzes, errorConstructor, sthStr + `(also none of type(s): ${types.join(", ")})`)
+    }
   }
 }
 
@@ -113,10 +162,27 @@ export function assertCondition(obj: any, conditionSth, errorConstructor: { new(
         }
         recordStrings.push(`(${conditionName}: ${isSatisfied ? "T" : "F"})`)
       }
+      recordStrings.push("]")
     }
       
     throw new errorConstructor(`${sthStr} does not satisfy the condition DNF: ${recordStrings.join("")}`)
   }
+}
+
+export function wrapAsNamedFunction<FunctionType extends Function>(func: FunctionType, name: string, args: any[] = []): FunctionType {
+  return Object.defineProperty(func, "name", {
+    value: `${name}(${args.map(arg => arg.toString()).join(", ")})`,
+    writable: false
+  })
+}
+
+export function passesAssertion(func, ...args): boolean {
+  try {
+    func(...args)
+  } catch (err) {
+    return false
+  }
+  return true
 }
 
 export function stringIsEmpty(s: string): boolean {
@@ -128,23 +194,39 @@ export function stringIsNotEmpty(s: string): boolean {
 }
 
 export function greaterThan(num: number): (numArg: number) => boolean {
-  return (numArg: number): boolean => numArg > num
+  return wrapAsNamedFunction(
+    (numArg: number): boolean => numArg > num,
+    arguments.callee.name,
+    Array.from(arguments)
+  )
 }
 
 export function lessThan(num: number): (numArg: number) => boolean {
-  return (numArg: number): boolean => numArg < num
+  return wrapAsNamedFunction(
+    (numArg: number): boolean => numArg < num,
+    arguments.callee.name,
+    Array.from(arguments)
+  )
 }
 
 export function greaterThanOrEqualTo(num: number): (numArg: number) => boolean {
-  return (numArg: number): boolean => numArg >= num
+  return wrapAsNamedFunction(
+    (numArg: number): boolean => numArg >= num,
+    arguments.callee.name,
+    Array.from(arguments)
+  )
 }
 
 export function lessThanOrEqualTo(num: number): (numArg: number) => boolean {
-  return (numArg: number): boolean => numArg <= num
+  return wrapAsNamedFunction(
+    (numArg: number): boolean => numArg <= num,
+    arguments.callee.name,
+    Array.from(arguments)
+  )
 }
 
 export function isJsonPlain(sth: any): boolean {
-  return (typeof sth === null || typeof sth === "string" || typeof sth === "boolean" || typeof sth === "number" || Array.isArray(sth) || sth.constructor === Object && sth.toString() === "[object Object]")
+  return (sth === null || typeof sth === "string" || typeof sth === "boolean" || typeof sth === "number" || Array.isArray(sth) || sth.constructor === Object && sth.toString() === "[object Object]")
 }
 
 export function isJsonSerializable(sth: any): boolean {
@@ -174,5 +256,9 @@ export function isJsonSerializable(sth: any): boolean {
   }
 
   return true
+}
+
+export function isNotNullNorUndefined(sth: any): boolean {
+  return sth !== null && sth !== undefined
 }
 

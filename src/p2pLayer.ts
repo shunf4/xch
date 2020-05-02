@@ -8,7 +8,7 @@ import PeerId from "peer-id"
 import multiaddr from "multiaddr"
 
 import { Profile } from "./profile"
-import { sleep, colorForRgb, defaultTo, assignOptions } from "./xchUtil"
+import { sleep, colorForRgb, assignOptions } from "./xchUtil"
 import Debug from "debug-level"
 import Chalk from "chalk"
 import { XchLibp2pConfig } from "./config"
@@ -181,9 +181,9 @@ export class P2pLayer extends EventEmitter {
       throw Error("profile not assigned")
     }
 
-    this.config = defaultTo(this.profile.config)(this.config)
+    this.config = this.config ? this.config : this.profile.config
 
-    this.node = defaultTo(await Libp2p.create({
+    this.node = this.node ? this.node : await Libp2p.create({
       modules: {
         transport: this.config.transportModules.map((moduleName) => require(moduleName)),
         connEncryption: this.config.connEncryptionModules.map((moduleName) => require(moduleName)),
@@ -194,7 +194,7 @@ export class P2pLayer extends EventEmitter {
       },
       config: this.config.libp2pConfig,
       peerInfo: new PeerInfo(this.config.peerId)
-    }))(this.node)
+    })
 
     await this.substitutePublicAddress()
 
@@ -226,10 +226,10 @@ export class P2pLayer extends EventEmitter {
       args: []
     }))
 
-    this.taskManagers.scheduledParallelism.register(this.pingAllPeers.bind(this))
-    this.taskManagers.scheduledParallelism.register(this.saveAllPeers.bind(this))
+    this.taskManagers.scheduledParallelism?.register(this.pingAllPeers.bind(this))
+    this.taskManagers.scheduledParallelism?.register(this.saveAllPeers.bind(this))
 
-    this.taskManagers.scheduledParallelism.register(new Task({
+    this.taskManagers.scheduledParallelism?.register(new Task({
       func: this.broadcastTest.bind(this),
       description: "broadcastTest",
       args: []

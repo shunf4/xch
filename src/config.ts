@@ -4,6 +4,7 @@ import Constants from "./constants"
 import Debug from "debug-level"
 import { KeyType } from "libp2p-crypto"
 import { ConfigValueError, ConfigTypeError } from "./errors"
+import { assertInstanceOf } from "./xchUtil"
 
 const debug = Debug("xch:config")
 
@@ -19,6 +20,8 @@ interface IXchLibp2pConfig {
   libp2pConfig: any,
 
   listenAddrs: string[],
+
+  extraAccountPeerIds: PeerId[],
 }
 
 
@@ -61,6 +64,9 @@ const XchLibp2pConfigDefaultGenerator: DefaultGenerator<IXchLibp2pConfig> = {
   listenAddrs: async () => {
     return Constants.DefaultListenAddrs.slice()
   },
+  extraAccountPeerIds: async () => {
+    return []
+  }
 }
 
 const _stringArrayNormalizer = async (input: any): Promise<string[]> => {
@@ -122,6 +128,21 @@ const XchLibp2pConfigNormalizer: Normalizer<IXchLibp2pConfig> = {
     return input
   },
   listenAddrs: _stringArrayNormalizer,
+  extraAccountPeerIds: async (input: any) => {
+    assertInstanceOf(input, Array, ConfigTypeError, "config.extraAccountPeerIds")
+    
+    const result: PeerId[] = []
+    const inputArray = input as any[]
+    for (const peerIdObj of inputArray) {
+      const peerId = await PeerId.createFromJSON(peerIdObj as PeerId.JSONPeerId)
+      if (!peerId.isValid()) {
+        throw new ConfigTypeError(`peerId invalid: ${peerIdObj}`)
+      }
+      result.push(peerId)
+    }
+
+    return result
+  },
 }
 
 
@@ -136,6 +157,7 @@ export class XchLibp2pConfig implements IXchLibp2pConfig {
   pubsubModule: string
   libp2pConfig: any
   listenAddrs: string[]
+  extraAccountPeerIds: PeerId[]
 
   toString(): string {
     return YAML.stringify(this)

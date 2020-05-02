@@ -1,11 +1,13 @@
-import { Entity, Column, PrimaryColumn, Index, OneToMany, ManyToMany, ManyToOne } from "typeorm"
+import { Entity, Column, PrimaryColumn, Index, OneToMany, ManyToMany, ManyToOne, BaseEntity, JoinTable } from "typeorm"
 import { Transaction } from "./Transaction"
-import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo } from "../xchUtil"
+import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo, assertTypeOrInstanceOf, passesAssertion } from "../xchUtil"
 import { EntityValueError } from "../errors"
+import { AccountStateSnapshot } from "./Account"
+import { CommonNormalizeOption } from "./common"
 
 @Entity()
 @Index(["hash"], { unique: true })
-export class Block {
+export class Block extends BaseEntity {
 
   @PrimaryColumn()
   hash: string
@@ -28,19 +30,23 @@ export class Block {
   @Column()
   generator: string // pubkey multihash
 
-  @OneToMany(type => Transaction, transaction => transaction.blockHash, { cascade: true })
+  @OneToMany(type => Transaction, transaction => transaction.block, { cascade: true })
   transactions: Transaction[]
 
   @Column()
   transactionsHash: string
 
+  @ManyToMany(type => AccountStateSnapshot, accountStateSnapShot => accountStateSnapShot.blocks)
+  @JoinTable()
+  accountStateSnapshots: AccountStateSnapshot[]
+
   @Column()
   stateHash: string
 
   @Column()
-  signature: Buffer
+  signature: string
 
-  public static async normalize(sth: any): Promise<Block> {
+  public static async normalize(sth: any, options: CommonNormalizeOption = {}): Promise<Block> {
     const validateList: [boolean, string, Function, string | any][] = [
       [false, "hash", assertType, "string"],
       [false, "hash", assertCondition, stringIsNotEmpty],
@@ -48,21 +54,23 @@ export class Block {
       [false, "version", assertCondition, function eqaulsOne(version: number): boolean {
         return version === 1
       }],
-      [false, "timestamp", assertInstanceOf, Date],
+      [false, "timestamp", assertTypeOrInstanceOf, ["string", Date]],
       [false, "height", assertType, "number"],
-      [false, "height", assertCondition, [[greaterThanOrEqualTo(0)]]],
+      [false, "height", assertCondition, Number.isInteger],
+      [false, "height", assertCondition, [[greaterThanOrEqualTo(0), greaterThanOrEqualTo(-3)], [greaterThanOrEqualTo(-3), greaterThanOrEqualTo(0)]]],
       [false, "prevHash", assertType, "string"],
       [false, "prevHash", assertCondition, stringIsNotEmpty],
       [false, "mineReward", assertType, "number"],
-      [false, "mineReward", assertType, greaterThanOrEqualTo(0)],
+      [false, "mineReward", assertCondition, Number.isInteger],
+      [false, "mineReward", assertCondition, greaterThanOrEqualTo(0)],
       [false, "generator", assertType, "string"],
       [false, "generator", assertCondition, stringIsNotEmpty],
       [false, "transactions", assertInstanceOf, Array],
-      [false, "transactionHash", assertType, "string"],
-      [false, "transactionHash", assertCondition, stringIsNotEmpty],
-      [false, "stateHash", assertType, "string"],
+      [false, "transactionsHash", assertType, "string"],
+      [false, "transactionsHash", assertCondition, stringIsNotEmpty],
+      [false, "accountStateSnapshots", assertInstanceOf, Array],
       [false, "stateHash", assertCondition, stringIsNotEmpty],
-      [false, "signature", assertInstanceOf, Buffer],
+      [false, "signature", assertType, "string"],
     ]
 
     validateList.forEach(([isOptional, propName, assertFunc, assertArg]) => {
@@ -71,18 +79,42 @@ export class Block {
       }
     })
 
-    const newObject = new Block()
-    Object.assign(newObject, sth)
+    const newObj = new Block()
+    Object.assign(newObj, sth)
 
-    newObject.transactions = []
-    for (const transaction of sth.transactions) {
-      newObject.transactions.push(await Transaction.normalize(transaction))
+    if (typeof sth.timestamp === "string") {
+      newObj.timestamp = new Date(newObj.timestamp)
+      if (isNaN(newObj.timestamp.getTime())) {
+        throw new EntityValueError(`Block.timestamp cannot be formatted to a Date: ${sth.timestamp}`)
+      }
     }
 
-    return newObject
+    newObj.transactions = []
+    for (const transaction of sth.transactions) {
+      newObj.transactions.push(await Transaction.normalize(transaction))
+    }
+
+    newObj.accountStateSnapshots = []
+    for (const accountStateSnapshot of sth.accountStateSnapshots) {
+      newObj.accountStateSnapshots.push(await AccountStateSnapshot.normalize(accountStateSnapshot))
+    }
+
+    return newObj
   }
 
-  public static async fromObject(obj: any): Promise<Block> {
-    return await Block.normalize(obj)
+  public static async fromObject(obj: Partial<Block>, options?: CommonNormalizeOption): Promise<Block> {
+    return await Block.normalize(obj, options)
+  }
+
+  public async reorder({ reverse } = { reverse: false }): Promise<Block> {
+    this.transactions?.sort((ta, tb) => ta.seqInBlock - tb.seqInBlock)
+    this.accountStateSnapshots?.sort((aa, ab) => (+(aa.publicKey > ab.publicKey) - +(aa.publicKey < ab.publicKey)))
+
+    if (reverse) {
+      this.transactions?.reverse()
+      this.accountStateSnapshots?.reverse()
+    }
+    
+    return this
   }
 }

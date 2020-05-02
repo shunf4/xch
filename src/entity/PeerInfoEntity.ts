@@ -32,8 +32,8 @@ export class PeerInfoEntity extends BaseEntity {
       }
     })
 
-    const newObject = new PeerInfoEntity()
-    Object.assign(newObject, sth)
+    const newObj = new PeerInfoEntity()
+    Object.assign(newObj, sth)
 
     if (sth.multiaddrs !== undefined) {
       const normalizedMultiaddrs = []
@@ -47,10 +47,10 @@ export class PeerInfoEntity extends BaseEntity {
         }))
       }
 
-      newObject.multiaddrs = normalizedMultiaddrs
+      newObj.multiaddrs = normalizedMultiaddrs
     }
 
-    return newObject
+    return newObj
   }
 
   public static async fromPeerInfo(peerInfo: PeerInfo): Promise<PeerInfoEntity> {
@@ -64,12 +64,12 @@ export class PeerInfoEntity extends BaseEntity {
   }
 
   public async toPeerInfo(): Promise<PeerInfo> {
-    const newObject = await PeerInfo.create(await PeerId.createFromJSON(this as any))
+    const newObj = await PeerInfo.create(await PeerId.createFromJSON(this as any))
     if (this.multiaddrs) {
       for (const multiaddr of this.multiaddrs) {
-        newObject.multiaddrs.add(new Multiaddr(multiaddr.addrString))
+        newObj.multiaddrs.add(new Multiaddr(multiaddr.addrString))
       }
     }
-    return newObject
+    return newObj
   }
 }

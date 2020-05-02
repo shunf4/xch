@@ -1,0 +1,63 @@
+{
+  "hash": "0000000000000000",
+  "version": 1,
+  "timestamp": "2020-05-02T15:49:12.641Z",
+  "height": 0,
+  "prevHash": "0000000000000000",
+  "mineReward": 0,
+  "generator": "12D3KooWNiKPHSwxPENkgt6HSHDmS92YPxXApyLZwcz7WaxtYu9h",
+  "transactions": [
+    {
+      "hash": "0000000000000000",
+      "seqInBlock": 0,
+      "type": "transfer",
+      "amount": 1000,
+      "fee": 0,
+      "timestamp": "2020-05-02T15:49:12.641Z",
+      "sender": "12D3KooWNiKPHSwxPENkgt6HSHDmS92YPxXApyLZwcz7WaxtYu9h",
+      "recipient": "12D3KooWNiKPHSwxPENkgt6HSHDmS92YPxXApyLZwcz7WaxtYu9h",
+      "signature": "0000000000000000",
+      "extraData": {}
+    },
+    {
+      "hash": "0000000000000001",
+      "seqInBlock": 1,
+      "type": "transfer",
+      "amount": 1000,
+      "fee": 0,
+      "timestamp": "2020-05-02T15:49:12.642Z",
+      "sender": "12D3KooWNiKPHSwxPENkgt6HSHDmS92YPxXApyLZwcz7WaxtYu9h",
+      "recipient": "12D3KooWGFf2Sje7rtT7kauuTcNGWdiRv3zMvFKVNEYuuD7e2BQF",
+      "signature": "0000000000000000",
+      "extraData": {}
+    },
+    {
+      "hash": "0000000000000002",
+      "seqInBlock": 2,
+      "type": "transfer",
+      "amount": 1000,
+      "fee": 0,
+      "timestamp": "2020-05-02T15:49:12.642Z",
+      "sender": "12D3KooWNiKPHSwxPENkgt6HSHDmS92YPxXApyLZwcz7WaxtYu9h",
+      "recipient": "12D3KooWGJ22V6kW6cTZQH6ZCFacQZkEakJcZq7hdVGngx9DuKzD",
+      "signature": "0000000000000000",
+      "extraData": {}
+    },
+    {
+      "hash": "0000000000000003",
+      "seqInBlock": 3,
+      "type": "transfer",
+      "amount": 1000,
+      "fee": 0,
+      "timestamp": "2020-05-02T15:49:12.642Z",
+      "sender": "12D3KooWNiKPHSwxPENkgt6HSHDmS92YPxXApyLZwcz7WaxtYu9h",
+      "recipient": "12D3KooWJnGYNL312TjaHgXYZ2uEmjuCgZbYBU64PLeqjAUPavg3",
+      "signature": "0000000000000000",
+      "extraData": {}
+    }
+  ],
+  "stateHash": "0000000000000000",
+  "signature": "0000000000000000",
+  "transactionsHash": "0000000000000000",
+  "accountStateSnapshots": []
+}
