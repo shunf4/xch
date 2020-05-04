@@ -36,9 +36,8 @@ export class Block extends BaseEntity {
   @Column()
   transactionsHash: string
 
-  @ManyToMany(type => AccountStateSnapshot, accountStateSnapShot => accountStateSnapShot.blocks)
-  @JoinTable()
-  accountStateSnapshots: AccountStateSnapshot[]
+  @OneToMany(type => AccountStateSnapshot, accountStateSnapShot => accountStateSnapShot.mostRecentAssociatedBlock)
+  mostRecentAssociatedAccountStateSnapshots: AccountStateSnapshot[]
 
   @Column()
   stateHash: string
@@ -68,7 +67,7 @@ export class Block extends BaseEntity {
       [false, "transactions", assertInstanceOf, Array],
       [false, "transactionsHash", assertType, "string"],
       [false, "transactionsHash", assertCondition, stringIsNotEmpty],
-      [false, "accountStateSnapshots", assertInstanceOf, Array],
+      [false, "mostRecentAssociatedAccountStateSnapshots", assertInstanceOf, Array],
       [false, "stateHash", assertCondition, stringIsNotEmpty],
       [false, "signature", assertType, "string"],
     ]
@@ -94,9 +93,9 @@ export class Block extends BaseEntity {
       newObj.transactions.push(await Transaction.normalize(transaction))
     }
 
-    newObj.accountStateSnapshots = []
-    for (const accountStateSnapshot of sth.accountStateSnapshots) {
-      newObj.accountStateSnapshots.push(await AccountStateSnapshot.normalize(accountStateSnapshot))
+    newObj.mostRecentAssociatedAccountStateSnapshots = []
+    for (const accountStateSnapshot of sth.mostRecentAssociatedAccountStateSnapshots) {
+      newObj.mostRecentAssociatedAccountStateSnapshots.push(await AccountStateSnapshot.normalize(accountStateSnapshot))
     }
 
     return newObj
@@ -108,11 +107,11 @@ export class Block extends BaseEntity {
 
   public async reorder({ reverse } = { reverse: false }): Promise<Block> {
     this.transactions?.sort((ta, tb) => ta.seqInBlock - tb.seqInBlock)
-    this.accountStateSnapshots?.sort((aa, ab) => (+(aa.publicKey > ab.publicKey) - +(aa.publicKey < ab.publicKey)))
+    this.mostRecentAssociatedAccountStateSnapshots?.sort((aa, ab) => (+(aa.publicKey > ab.publicKey) - +(aa.publicKey < ab.publicKey)))
 
     if (reverse) {
       this.transactions?.reverse()
-      this.accountStateSnapshots?.reverse()
+      this.mostRecentAssociatedAccountStateSnapshots?.reverse()
     }
     
     return this

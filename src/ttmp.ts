@@ -14,7 +14,7 @@ import { P2pLayer } from "./p2pLayer"
 import { Blockchain } from "./blockchain"
 
 import constants from "./constants"
-import { sleep, doNotWait } from "./xchUtil"
+import { sleep, doNotWait, itJson } from "./xchUtil"
 import Debug from "debug-level"
 
 import Yargs from "yargs"
@@ -31,6 +31,10 @@ let taskManagers: TaskManagerCombination
 let p2pLayer: P2pLayer
 let blockchain: Blockchain
 
+import pipe from "it-pipe"
+import duplex from "it-pair/duplex"
+import itLengthPrefixed from "it-length-prefixed"
+import { Telephone } from "./telephone"
 
 async function readArgv(): Promise<any> {
   const argv: any = Yargs.default("profileDir", "./.xch").argv
@@ -40,6 +44,13 @@ async function readArgv(): Promise<any> {
 
 async function initDb({ profile }: { profile: Profile }): Promise<void> {
   const connectionOptions = await getConnectionOptions()
+  if (process[Symbol.for("ts-node.register.instance")] !== undefined) {
+    Object.assign(connectionOptions, {
+      entities: connectionOptions["tsEntities"],
+      migrations: connectionOptions["tsMigrations"],
+      subscribers: connectionOptions["tsSubscribers"],
+    })
+  }
   Object.assign(connectionOptions, {
     database: path.join(profile.profileDir, "database.db")
   })
@@ -76,39 +87,96 @@ async function main(): Promise<void> {
     await init()
     await start()
 
-    const emptyDataStr = "0000000000000000"
-    const genesisBlock = await Block.fromObject({
-      hash: emptyDataStr,
-      version: 1,
-      timestamp: new Date(),
-      height: 0,
-      prevHash: emptyDataStr,
-      mineReward: 0,
-      generator: profile.config.peerId.toB58String(),
-      transactions: [],
-      stateHash: emptyDataStr,
-      signature: emptyDataStr,
-      transactionsHash: emptyDataStr,
-      accountStateSnapshots: []
+
+    const [client, server] = duplex()
+
+    const clientTelephone = new Telephone({
+      name: "client"
+    })
+    const serverTelephone = new Telephone({
+      name: "server"
+    })
+    pipe(
+      client,
+      itLengthPrefixed.decode({ maxDataLength: 100 }),
+      itJson.decoder,
+      clientTelephone,
+      itJson.encoder,
+      itLengthPrefixed.encode({ maxDataLength: 100 }),
+      client
+    )
+
+    pipe(
+      server,
+      itLengthPrefixed.decode({ maxDataLength: 100 }),
+      itJson.decoder,
+      serverTelephone,
+      itJson.encoder,
+      itLengthPrefixed.encode({ maxDataLength: 100 }),
+      server
+    )
+    
+    serverTelephone.answering("hello", async (content, handset) => {
+      console.log(`c2s: hello`)
+      await sleep(1000)
+      await handset.answer("hello!!")
     })
 
-    {
-      const f = await fs.promises.open("./testGenesisBlock.json", "w")
-      await f.writeFile(JSON.stringify(genesisBlock, null, 2), {
-        encoding: "utf-8"
-      })
-      await f.close()
-    }
+    serverTelephone.answering("yoyo", async (content, handset) => {
+      console.log(`c2s: yoyo`)
+      await handset.answer("yooooo!!")
+    })
 
-    {
-      const f = await fs.promises.open("./testGenesisBlock.json", "r")
-      const x = JSON.parse(await f.readFile({
-        encoding: "utf-8"
-      }))
-      console.log(x)
-      debug.info(x)
-      console.log(await Block.fromObject(x))
-    }
+    clientTelephone.answering("meme", async (content, handset) => {
+      console.log(`s2c: meme`)
+      await sleep(1000)
+      await handset.answer("meeeeeeee!!")
+    })
+
+    clientTelephone.answering("nono", async (content, handset) => {
+      console.log(`s2c: nono`)
+      await handset.answer("noooooooo!!")
+    })
+
+    // void(pipe(
+    //   process.stdin,
+    //   (source) => (async function * () {
+    //     for await (const input of source) {
+    //       yield { fuck: input }
+    //     }
+    //   })(),
+    //   async (source) => {
+    //     for await (const obj of source) {
+    //       clientTelephone.writer.push(obj as any)
+    //     }
+    //   }
+    // ))
+
+    doNotWait((async (): Promise<void> => {
+      const response = await clientTelephone.ask("hello", null)
+      console.log("s2c:", response)
+    })())
+
+    doNotWait((async (): Promise<void> => {
+      const response = await clientTelephone.ask("yoyo", null)
+      console.log("s2c:", response)
+    })())
+
+    doNotWait(clientTelephone.hangUp())
+
+    doNotWait((async (): Promise<void> => {
+      const response = await serverTelephone.ask("meme", null)
+      console.log("c2s:", response)
+      await sleep(2000)
+      await serverTelephone.hangUp()
+      await sleep(2000)
+    })())
+
+    doNotWait((async (): Promise<void> => {
+      await sleep(1000)
+      const response = await serverTelephone.ask("nono", null)
+      console.log("c2s:", response)
+    })())
 
   } catch (err) {
     if (err.stack) {

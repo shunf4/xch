@@ -1,90 +1,44 @@
-const Pipe = require("it-pipe")
-const ItPushable = require("it-pushable")
-const ItLengthPrefixed = require("it-length-prefixed")
-const { EventEmitter } = require("events")
-const { inspect } = require("util")
+const abortable = require('abortable-iterator')
+const AbortController = require('abort-controller')
 
-const Debug = require("debug-level")
-const debug = Debug("xch:tmp")
-
-function stdinToStream(stream) {
-  // Read utf-8 from stdin
-  process.stdin.setEncoding('utf8')
-  Pipe(
-    // Read from stdin (the source)
-    process.stdin,
-    // Encode with length prefix (so receiving side knows how much data is coming)
-    ItLengthPrefixed.encode(),
-    // Write to the stream (the sink)
-    stream.sink
-  )
-}
-
-function writerToStream(pushable, stream) {
-  Pipe(
-    pushable,
-    // Encode with length prefix (so receiving side knows how much data is coming)
-    ItLengthPrefixed.encode(),
-    // Write to the stream (the sink)
-    stream.sink
-  )
-}
-
-function streamToConsole(stream) {
-  Pipe(
-    // Read from the stream (the source)
-    stream.source,
-    // Print raw
-    function(source) {
-      const ret = (async function * () {
-        for await (const chunk of source) {
-          console.log(`raw: ${inspect(chunk.slice())}`)
-          yield chunk
-        }
-      })()
-      return ret
-    },
-    // Decode length-prefixed data
-    ItLengthPrefixed.decode(),
-    // Sink function
-    async function (source) {
-      // For each chunk of data
-      for await (const msg of source) {
-        // Output the data as a utf8 string
-        console.log('> ' + msg.toString('utf8').replace('\n', ''))
-      }
-    }
-  )
-}
-
-const stream = new EventEmitter()
-
-stream.sink = async function(source) {
-  for await (const chunk of source) {
-    stream.emit("data", chunk)
+// An example function that creates an async iterator that yields an increasing
+// number every x milliseconds and NEVER ENDS!
+const asyncCounter = async function * (start, delay) {
+  let i = start
+  while (true) {
+    yield new Promise(resolve => setTimeout(() => {
+      console.log(`(${i})`)
+      resolve(i++)
+    }, delay))
   }
 }
 
-stream.source = {
-  [Symbol.asyncIterator] () {
-    return {
-      async next () {
-        const chunk = await new Promise((resolve) => { stream.resolve = resolve })
-        return { done: false, value: chunk }
-      }
+;void((async () => {
+  // Create a counter that'll yield numbers from 0 upwards every second
+  const everySecond = asyncCounter(0, 1000)
+
+  // Make everySecond abortable!
+  const controller = new AbortController()
+  const abortableEverySecond = abortable(everySecond, controller.signal)
+
+  // Abort after 5 seconds
+  setTimeout(() => controller.abort(), 5000)
+
+  setTimeout(() => {}, 20000)
+
+  try {
+    // Start the iteration, which will throw after 5 seconds when it is aborted
+    for await (const n of abortableEverySecond) {
+      console.log(n)
+    }
+  } catch (err) {
+    if (err.code === 'ERR_ABORTED' || err.code === 'ABORT_ERR') {
+      console.log("aborted: ok")
+      // Expected - all ok :D
+    } else {
+      console.log("other err: not ok", err.code)
+      throw err
     }
   }
-}
-
-stream.on("data", function(chunk) {
-  if (this.resolve) {
-    this.resolve(chunk)
-  }
-})
-
-const writer = ItPushable()
-writerToStream(writer, stream)
-streamToConsole(stream)
-
-writer.push(Buffer.from("xyz"))
+})())
 

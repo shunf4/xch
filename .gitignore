@@ -7,3 +7,4 @@ temp/
 .xch/
 built/
 *.bak
+.ipynb_checkpoints/

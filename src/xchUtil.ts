@@ -262,3 +262,16 @@ export function isNotNullNorUndefined(sth: any): boolean {
   return sth !== null && sth !== undefined
 }
 
+export const itJson = {
+  decoder: (source: AsyncIterable<Buffer>): AsyncGenerator<any> => (async function * (): any {
+    for await (const messageRaw of source) {
+      yield JSON.parse(messageRaw.toString("utf-8"))
+    }
+  })(),
+
+  encoder: (source: AsyncIterable<any>): AsyncGenerator<Buffer> => (async function * (): any {
+    for await (const objRaw of source) {
+      yield Buffer.from(JSON.stringify(objRaw), "utf-8")
+    }
+  })(),
+}

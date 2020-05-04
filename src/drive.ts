@@ -38,6 +38,13 @@ async function readArgv(): Promise<any> {
 
 async function initDb({ profile }: { profile: Profile }): Promise<void> {
   const connectionOptions = await getConnectionOptions()
+  if (process[Symbol.for("ts-node.register.instance")] !== undefined) {
+    Object.assign(connectionOptions, {
+      entities: connectionOptions["tsEntities"],
+      migrations: connectionOptions["tsMigrations"],
+      subscribers: connectionOptions["tsSubscribers"],
+    })
+  }
   Object.assign(connectionOptions, {
     database: path.join(profile.profileDir, "database.db")
   })

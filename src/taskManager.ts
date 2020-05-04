@@ -1,12 +1,12 @@
 import Debug from "debug-level"
 import Constants from "./constants"
 import __ from "underscore"
-import PDefer from "p-defer"
+import pDefer from "p-defer"
 
 import { assignOptions } from "./xchUtil"
 
-type DeferredPromise<T> = PDefer.DeferredPromise<T>
-const createDeferredPromise = PDefer
+type DeferredPromise<T> = pDefer.DeferredPromise<T>
+const createDeferredPromise = pDefer
 
 const debug = Debug("xch:task")
 

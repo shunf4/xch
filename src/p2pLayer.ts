@@ -5,29 +5,30 @@ import { EventEmitter } from "events"
 
 import PeerInfo from "peer-info"
 import PeerId from "peer-id"
-import multiaddr from "multiaddr"
+import Multiaddr from "multiaddr"
 
 import { Profile } from "./profile"
-import { sleep, colorForRgb, assignOptions } from "./xchUtil"
+import { sleep, colorForRgb, assignOptions, itJson } from "./xchUtil"
 import Debug from "debug-level"
-import Chalk from "chalk"
+import chalk from "chalk"
 import { XchLibp2pConfig } from "./config"
 
-import Pipe from "it-pipe"
-import ItLengthPrefixed from "it-length-prefixed"
+import itPipe from "it-pipe"
+import itLengthPrefixed from "it-length-prefixed"
 
 import { TaskManagerCombination } from "./taskManagerCombination"
 import { Task } from "./taskManager"
 import { PeerInfoEntity } from "./entity/PeerInfoEntity"
 import { getConnection } from "typeorm"
 import { MultiaddrEntity } from "./entity/MultiaddrEntity"
+import { Telephone, TelephoneMessage } from "./telephone"
 
 const debug = Debug("xch:p2p:main")
-debug.color = Chalk.hex("#006600")
+debug.color = chalk.hex("#006600")
 const eventsDebug = Debug("xch:p2p:events")
-eventsDebug.color = Chalk.hex("#AA22DD")
+eventsDebug.color = chalk.hex("#AA22DD")
 const verboseDebug = Debug("xch:p2p:verbose")
-verboseDebug.color = Chalk.hex("#444444")
+verboseDebug.color = chalk.hex("#444444")
 
 enum PubsubTopicDataType {
   Raw,
@@ -59,7 +60,7 @@ export class P2pLayer extends EventEmitter {
     if (this.node.identifyService) {
       const publicPeerInfo = new PeerInfo(this.config.peerId)
       publicPeerInfo.id = this.node.peerInfo.id
-      publicPeerInfo.multiaddrs = this.config.overridingPublicAddressPrefixes ? this.config.overridingPublicAddressPrefixes.map((addrStr) => multiaddr(addrStr)) : this.node.peerInfo.multiaddrs
+      publicPeerInfo.multiaddrs = this.config.overridingPublicAddressPrefixes ? this.config.overridingPublicAddressPrefixes.map((addrStr) => Multiaddr(addrStr)) : this.node.peerInfo.multiaddrs
       publicPeerInfo.protocols = this.node.peerInfo.protocols
 
       this.node.identifyService = new IdentifyService({
@@ -200,18 +201,27 @@ export class P2pLayer extends EventEmitter {
 
     // Add listenAddrs
     this.config.listenAddrs.forEach((addrStr) => {
-      this.node.peerInfo.multiaddrs.add(multiaddr(addrStr))
+      this.node.peerInfo.multiaddrs.add(Multiaddr(addrStr))
     })
 
     // Add saved peers
     await this.loadAllPeers()
 
     // Add protocol handlers
+    const telephone = new Telephone()
     await this.node.handle("/test", ({ stream }) => {
-      Pipe(
+      itPipe(
         stream,
+        itLengthPrefixed.decode(),
+        itJson.decoder,
+        telephone,
+        itJson.encoder,
+        itLengthPrefixed.encode(),
+        stream
       )
     })
+
+    // TODO: dialProtocol => telephone
 
     // start
     await this.node.start()

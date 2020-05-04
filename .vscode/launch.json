@@ -16,6 +16,30 @@
     {
       "type": "node",
       "request": "launch",
+      "name": "Launch Ttmp",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "program": "${workspaceFolder}/src/ttmp.ts",
+      "preLaunchTask": "tsc: build - tsconfig.json",
+      "outFiles": [
+        "${workspaceFolder}/built/**/*.js"
+      ]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Ttmp in JS",
+      "program": "${workspaceFolder}/built/ttmp.js",
+      "sourceMaps": false,
+      "disableOptimisticBPs": true,
+      "showAsyncStacks": true,
+      "trace": true,
+      "smartStep": false,
+    },
+    {
+      "type": "node",
+      "request": "launch",
       "name": "Launch Program",
       "skipFiles": [
         "<node_internals>/**"
