@@ -22,6 +22,7 @@ export type ItUpstream = {
   source: AsyncIterable<any>,
 }
 
+export type TelephoneListenerFunction = (questionContent: any, handset: Handset) => Promise<any>
 
 export class Handset {
   tag: string
@@ -196,7 +197,7 @@ export class Telephone {
     const it = createTimingOutSource<TelephoneMessage>(
       source,
       this.createNewAskPromise.bind(this),
-      1000,
+      10000,
       "telephone reading timeout"
     )[Symbol.asyncIterator]()
 
@@ -267,7 +268,7 @@ export class Telephone {
     this.checkEnd()
   }
 
-  private answeringWorker(questionTag: string, listener: (questionContent: any, handset: Handset) => Promise<any>): void {
+  private answeringWorker(questionTag: string, listener: TelephoneListenerFunction): void {
     this.eventEmitter.on(questionTag, async (questionContent: any, handset: Handset): Promise<void> => {
       if (this._hasEndedRead) {
         debug.warn(`${this.name}: unexpected: peer sent ${questionContent} after we ended reading`)
@@ -305,7 +306,7 @@ export class Telephone {
     })
   }
 
-  answering(questionTag: string, listener: (questionContent: any, handset: Handset) => Promise<any>): this {
+  answering(questionTag: string, listener: TelephoneListenerFunction): this {
     if (questionTag === "end") {
       throw new TelephoneBadTagError(`"end" is not allowed as a tag`)
     }

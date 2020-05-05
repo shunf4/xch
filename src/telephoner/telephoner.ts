@@ -1,16 +1,17 @@
 import Debug from "debug-level"
 import itPipe from "it-pipe"
 import itLengthPrefixed from "it-length-prefixed"
-import { itJson } from "./xchUtil"
+import { itJson } from "../xchUtil"
 
-import { Telephone, ItUpstream } from "./telephone"
+import { Telephone, ItUpstream, TelephoneListenerFunction } from "../telephone"
 
 import AbortController from "abort-controller"
 import abortable from "abortable-iterator"
 
 const debug = Debug("xch:telephone")
 
-export class Telephoner {
+export class BaseTelephoner {
+  public static listeners: [string, TelephoneListenerFunction][] = []
   name: string
   telephone: Telephone
   wire: ItUpstream
@@ -25,7 +26,7 @@ export class Telephoner {
     this.wire = wire
   }
 
-  start(): void {
+  async start(): Promise<void> {
     itPipe(
       this.wire,
       itLengthPrefixed.decode({ maxDataLength: 10000 }),
@@ -35,5 +36,9 @@ export class Telephoner {
       itLengthPrefixed.encode({ maxDataLength: 10000 }),
       this.wire
     )
+    
+    for (const [tag, func] of (this.constructor as any).listeners) {
+      this.telephone.answering(tag, func)
+    }
   }
 }

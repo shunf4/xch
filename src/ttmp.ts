@@ -35,6 +35,7 @@ import pipe from "it-pipe"
 import duplex from "it-pair/duplex"
 import itLengthPrefixed from "it-length-prefixed"
 import { Telephone } from "./telephone"
+import { TestTelephoner } from "./telephoner/testTelephoner"
 import { doesNotMatch } from "assert"
 
 async function readArgv(): Promise<any> {
@@ -98,6 +99,12 @@ async function main(): Promise<void> {
       name: "server"
     })
 
+    doNotWait(new TestTelephoner({
+      name: "serverTelephoner",
+      telephone: serverTelephone,
+      wire: server
+    }).start())
+
     pipe(
       client,
       itLengthPrefixed.decode({ maxDataLength: 100 }),
@@ -108,26 +115,26 @@ async function main(): Promise<void> {
       client
     )
 
-    pipe(
-      server,
-      itLengthPrefixed.decode({ maxDataLength: 100 }),
-      itJson.decoder,
-      serverTelephone,
-      itJson.encoder,
-      itLengthPrefixed.encode({ maxDataLength: 100 }),
-      server
-    )
+    // pipe(
+    //   server,
+    //   itLengthPrefixed.decode({ maxDataLength: 100 }),
+    //   itJson.decoder,
+    //   serverTelephone,
+    //   itJson.encoder,
+    //   itLengthPrefixed.encode({ maxDataLength: 100 }),
+    //   server
+    // )
     
-    serverTelephone.answering("hello", async (content, handset) => {
-      console.log(`c2s: hello`)
-      await sleep(5000)
-      await handset.answer("hello!!")
-    })
+    // serverTelephone.answering("hello", async (content, handset) => {
+    //   console.log(`c2s: hello`)
+    //   await sleep(5000)
+    //   await handset.answer("hello!!")
+    // })
 
-    serverTelephone.answering("yoyo", async (content, handset) => {
-      console.log(`c2s: yoyo`)
-      await handset.answer("yooooo!!")
-    })
+    // serverTelephone.answering("yoyo", async (content, handset) => {
+    //   console.log(`c2s: yoyo`)
+    //   await handset.answer("yooooo!!")
+    // })
 
     clientTelephone.answering("meme", async (content, handset) => {
       try {
@@ -139,15 +146,16 @@ async function main(): Promise<void> {
       }
     })
 
-    clientTelephone.answering("nono", async (content, handset) => {
-      try {
-        console.log(`s2c: nono`)
-        await handset.answer("noooooooo!!")
-      } catch (err) {
-        console.log("ans nono", err.constructor.name)
-      }
-    })
+    // clientTelephone.answering("nono", async (content, handset) => {
+    //   try {
+    //     console.log(`s2c: nono`)
+    //     await handset.answer("noooooooo!!")
+    //   } catch (err) {
+    //     console.log("ans nono", err.constructor.name)
+    //   }
+    // })
 
+    // console.log(TestTelephoner)
 
     // void(pipe(
     //   process.stdin,
