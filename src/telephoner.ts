@@ -5,6 +5,9 @@ import { itJson } from "./xchUtil"
 
 import { Telephone, ItUpstream } from "./telephone"
 
+import AbortController from "abort-controller"
+import abortable from "abortable-iterator"
+
 const debug = Debug("xch:telephone")
 
 export class Telephoner {

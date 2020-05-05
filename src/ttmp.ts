@@ -35,6 +35,7 @@ import pipe from "it-pipe"
 import duplex from "it-pair/duplex"
 import itLengthPrefixed from "it-length-prefixed"
 import { Telephone } from "./telephone"
+import { doesNotMatch } from "assert"
 
 async function readArgv(): Promise<any> {
   const argv: any = Yargs.default("profileDir", "./.xch").argv
@@ -96,6 +97,7 @@ async function main(): Promise<void> {
     const serverTelephone = new Telephone({
       name: "server"
     })
+
     pipe(
       client,
       itLengthPrefixed.decode({ maxDataLength: 100 }),
@@ -118,7 +120,7 @@ async function main(): Promise<void> {
     
     serverTelephone.answering("hello", async (content, handset) => {
       console.log(`c2s: hello`)
-      await sleep(1000)
+      await sleep(5000)
       await handset.answer("hello!!")
     })
 
@@ -128,15 +130,24 @@ async function main(): Promise<void> {
     })
 
     clientTelephone.answering("meme", async (content, handset) => {
-      console.log(`s2c: meme`)
-      await sleep(1000)
-      await handset.answer("meeeeeeee!!")
+      try {
+        console.log(`s2c: meme`)
+        await sleep(5000)
+        await handset.answer("meeeeeeee!!")
+      } catch (err) {
+        console.log("ans meme", err.constructor.name)
+      }
     })
 
     clientTelephone.answering("nono", async (content, handset) => {
-      console.log(`s2c: nono`)
-      await handset.answer("noooooooo!!")
+      try {
+        console.log(`s2c: nono`)
+        await handset.answer("noooooooo!!")
+      } catch (err) {
+        console.log("ans nono", err.constructor.name)
+      }
     })
+
 
     // void(pipe(
     //   process.stdin,
@@ -153,29 +164,13 @@ async function main(): Promise<void> {
     // ))
 
     doNotWait((async (): Promise<void> => {
-      const response = await clientTelephone.ask("hello", null)
-      console.log("s2c:", response)
-    })())
-
-    doNotWait((async (): Promise<void> => {
-      const response = await clientTelephone.ask("yoyo", null)
-      console.log("s2c:", response)
-    })())
-
-    doNotWait(clientTelephone.hangUp())
-
-    doNotWait((async (): Promise<void> => {
-      const response = await serverTelephone.ask("meme", null)
-      console.log("c2s:", response)
-      await sleep(2000)
-      await serverTelephone.hangUp()
-      await sleep(2000)
-    })())
-
-    doNotWait((async (): Promise<void> => {
-      await sleep(1000)
-      const response = await serverTelephone.ask("nono", null)
-      console.log("c2s:", response)
+      try {
+        await sleep(4500)
+        const response = await clientTelephone.ask("hello", null)
+        console.log("s2c:", response)
+      } catch (err) {
+        console.log("ask hello", err.constructor.name)
+      }
     })())
 
   } catch (err) {

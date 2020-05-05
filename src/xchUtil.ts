@@ -1,7 +1,8 @@
 import Ansi256Colors from "ansi-256-colors"
 import __ from "underscore"
-import { RuntimeLogicError } from "./errors"
+import { RuntimeLogicError, TimeoutError } from "./errors"
 import { Arguments } from "yargs"
+import { TelephoneMessage } from "./telephone"
 
 export async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -274,4 +275,65 @@ export const itJson = {
       yield Buffer.from(JSON.stringify(objRaw), "utf-8")
     }
   })(),
+}
+
+export function createTimingOutSource<T> (
+  source: AsyncIterable<T>,
+  createResetSignalPromise: () => Promise<void>,
+  timeoutMillisec: number,
+  timeoutErrorMessage: string
+): AsyncIterable<T> & AsyncIterator<T> {
+  const timingOutSource: {
+    missed: Promise<IteratorResult<T, any>>,
+    sourceIt: AsyncIterator<T>,
+  } & AsyncIterable<T> & AsyncIterator<T> = {
+    missed: null,
+    sourceIt: source[Symbol.asyncIterator](),
+
+    [Symbol.asyncIterator]() {
+      return this
+    },
+
+    async next() {
+      const that = timingOutSource // this
+
+      while (true) {
+        let isTimeout = false
+        let isReset = false
+        const timeoutPromise = sleep(timeoutMillisec)
+        const resetPromise = createResetSignalPromise()
+
+        let valuePromise: Promise<IteratorResult<T, any>>
+        if (that.missed) {
+          valuePromise = that.missed
+        } else {
+          valuePromise = that.sourceIt.next()
+          that.missed = valuePromise
+        }
+
+        doNotWait(timeoutPromise.then(() => {
+          isTimeout = true
+        }))
+
+        doNotWait(resetPromise.then(() => {
+          isReset = true
+        }))
+
+        const raceResult = await Promise.race([timeoutPromise, valuePromise, resetPromise])
+        if (isTimeout) {
+          throw new TimeoutError(timeoutErrorMessage)
+        }
+
+        if (isReset) {
+          continue
+        }
+
+        const valueResult = raceResult as IteratorResult<T>
+        that.missed = null
+        return valueResult
+      }
+    }
+  }
+
+  return timingOutSource
 }

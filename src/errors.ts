@@ -16,5 +16,8 @@ export class TelephoneBadPeerError extends Error {
 export class TelephoneBadTagError extends Error {
 }
 
-export class TelephonePeerShutdownError extends Error {
+export class TelephonePeerEndedWriteError extends Error {
+}
+
+export class TimeoutError extends Error {
 }
