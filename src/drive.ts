@@ -54,7 +54,7 @@ async function initDb({ profile }: { profile: Profile }): Promise<void> {
 async function init(): Promise<void> {
   const argv = await readArgv()
 
-  profile = await Profile.create({ profileDir: argv.profileDir, clear: argv.clear })
+  profile = await Profile.create(argv)
 
   await initDb({ profile })
 
@@ -84,13 +84,13 @@ async function init(): Promise<void> {
   })
 
   p2pLayer = await P2pLayer.create({ profile, taskManagers })
-  blockchain = await Blockchain.create({ p2pLayer, taskManagers })
+  blockchain = await Blockchain.create({ profile, p2pLayer, taskManagers })
 }
 
 async function start(): Promise<void> {
   await blockchain.start()
   await taskManagers.scheduler.start()
-  addTaskManagerDebugTask({ taskManagers, debug })
+  // addTaskManagerDebugTask({ taskManagers, debug })
 }
 
 async function poll(): Promise<QueueTaskManager> {

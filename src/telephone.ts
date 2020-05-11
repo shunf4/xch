@@ -5,6 +5,7 @@ import pushable, { Pushable } from "it-pushable"
 import Debug from "debug-level"
 import { runInNewContext } from "vm";
 import { createTimingOutSource } from "./xchUtil";
+import Constants from "./constants";
 
 const debug = Debug("xch:telephone")
 
@@ -39,11 +40,11 @@ export class Handset {
   }
 
   public async answer(content: any): Promise<void> {
-    this.telephone.resolveFirstAnswerableDeferred()
-    await this.answerableDeferred.promise
     if (this.hasAnswered) {
       throw new RuntimeLogicError(`you can't answer twice or more`)
     }
+    this.telephone.resolveFirstAnswerableDeferred()
+    await this.answerableDeferred.promise
 
     if (this.telephone.hasEndedWrite) {
       debug.warn(`${this.telephone.name}.handset[${this.tag}]: you can't answer with a telephone that stopped writing`)
@@ -197,7 +198,7 @@ export class Telephone {
     const it = createTimingOutSource<TelephoneMessage>(
       source,
       this.createNewAskPromise.bind(this),
-      10000,
+      Constants.TelephoneTimeout,
       "telephone reading timeout"
     )[Symbol.asyncIterator]()
 
@@ -237,11 +238,11 @@ export class Telephone {
         break
       } catch (err) {
         if (err instanceof TimeoutError) {
-          if (this.waitForAnswerQueue.length === 0) {
+          if (this.waitForAnswerQueue.length === 0 && Constants.WillTelephoneIgnoreTimeoutWhenNotWaitingForAnswer) {
             debug.debug(`${this.name}: timeout, but we are not waiting for answer. ignoring`)
             continue
           } else {
-            debug.error(`${this.name}: timeout waiting for an answer. ending`)
+            debug.error(`${this.name}: timeout. ending`)
             while (this.waitForAnswerQueue.length) {
               const queueItem = this.waitForAnswerQueue.shift()
               debug.debug(`${this.name}: rejecting "${queueItem.tag}" with reason: peer timeout`)

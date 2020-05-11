@@ -2,7 +2,7 @@ declare module "libp2p" {
   import { EventEmitter } from "events"
   import PeerId from "peer-id";
   import PeerInfo from "peer-info";
-  import { Multiaddr } from "multiaddr";
+  import Multiaddr from "multiaddr";
 
   interface ContentRouting {
     provide(key: Buffer, callback: () => any): void

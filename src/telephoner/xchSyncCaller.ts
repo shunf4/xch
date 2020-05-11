@@ -2,28 +2,26 @@ import { sleep } from "../xchUtil"
 
 import { Telephone, ItUpstream, TelephoneListenerFunction, Handset } from "../telephone"
 import { BaseTelephoner, answering } from "./baseTelephoner"
+import { TaskManagerCombination } from "../taskManagerCombination"
+import { Task } from "../taskManager"
 
-export class TestTelephoner extends BaseTelephoner {
+export class XchSyncCaller extends BaseTelephoner {
   public static listeners: [string, TelephoneListenerFunction][] = []
+  public taskManagers: TaskManagerCombination
+
   constructor(options:
     { name?: string,
       telephone: Telephone,
       wire: ItUpstream,
+      taskManagers: TaskManagerCombination,
     }) {
     super(options)
-  }
-
-  @answering()
-  async onHello(questionContent: any, handset: Handset): Promise<void> {
-    console.log(`c2s: hello`)
-    await sleep(300)
-    await handset.answer("hello!!")
-    await handset.answer("hello!!")
+    this.taskManagers = options.taskManagers
   }
 
   async start(): Promise<void> {
     await super.start()
 
-    await this.telephone.ask("meme", null)
+    const latestBlockResp = await this.telephone.ask("latestBlock", {})
   }
 }

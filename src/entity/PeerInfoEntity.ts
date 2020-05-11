@@ -1,10 +1,21 @@
-import { Entity, Column, OneToMany, BaseEntity, PrimaryColumn } from "typeorm"
+import { Entity, Column, OneToMany, BaseEntity, PrimaryColumn, getConnection, SelectQueryBuilder } from "typeorm"
 import { MultiaddrEntity } from "./MultiaddrEntity"
 import PeerInfo from "peer-info"
 import PeerId from "peer-id"
 import { EntityValueError } from "../errors"
-import { assertType, assertInstanceOf, assertCondition, stringIsNotEmpty } from "../xchUtil"
+import { assertType, assertInstanceOf, assertCondition, stringIsNotEmpty, assertTypeOrInstanceOf, TypelessPartial } from "../xchUtil"
 import Multiaddr from "multiaddr"
+import { validateEntity } from "./common"
+
+const getCurrentEntityConstructor = () => PeerInfoEntity
+type CurrentEntityConstructor = (typeof getCurrentEntityConstructor) extends () => infer R ? R : any
+type CurrentEntity = (typeof getCurrentEntityConstructor) extends () => { new (...args: any): infer R } ? R : any
+let CurrentEntity: CurrentEntityConstructor
+let CurrentEntityNameCamelCase: string
+function initCurrentEntity(): void {
+  CurrentEntity = getCurrentEntityConstructor()
+  CurrentEntityNameCamelCase = CurrentEntity.name[0].toLowerCase() + CurrentEntity.name.slice(1)
+}
 
 @Entity()
 export class PeerInfoEntity extends BaseEntity {
@@ -17,38 +28,68 @@ export class PeerInfoEntity extends BaseEntity {
   @OneToMany(type => MultiaddrEntity, multiaddrEntity => multiaddrEntity.peerInfoId, { cascade: true })
   multiaddrs: MultiaddrEntity[]
 
-  public static async normalize(sth: any): Promise<PeerInfoEntity> {
-    const validateList: [boolean, string, Function, string | any][] = [
+  public static addLeftJoinAndSelect<ET>(qb: SelectQueryBuilder<ET>): SelectQueryBuilder<ET> {
+    let currentJoined = qb
+      .leftJoinAndSelect("peerInfoEntity.multiaddrs", "multiaddrEntity")
+
+    currentJoined = MultiaddrEntity.addLeftJoinAndSelect<ET>(currentJoined)
+
+    return currentJoined
+  }
+
+  public static async normalize(sth: TypelessPartial<CurrentEntity>, {
+    shouldCheckRelations = false,
+    shouldLoadRelationsIfUndefined = false
+  } = {}): Promise<CurrentEntity> {
+    validateEntity(getCurrentEntityConstructor, sth, [
       [false, "id", assertType, "string"],
       [false, "id", assertCondition, stringIsNotEmpty],
       [false, "pubKey", assertType, "string"],
       [false, "pubKey", assertCondition, stringIsNotEmpty],
-      [true, "multiaddrs", assertInstanceOf, Array],
-    ]
 
-    validateList.forEach(([isOptional, propName, assertFunc, assertArg]) => {
-      if (!isOptional || sth[propName] !== undefined) {
-        assertFunc(sth[propName], assertArg, EntityValueError, `PeerInfoEntity.${propName}`)
+      [true, "multiaddrs", assertTypeOrInstanceOf, ["undefined", Array]],
+    ])
+
+    let newObj: CurrentEntity
+
+    // reload entity with relations or normalize entity including all children
+    if (shouldLoadRelationsIfUndefined && (
+      sth.multiaddrs === undefined
+    )) {
+      // reload entity with relations
+      let allRelationsSqb = getConnection()
+        .createQueryBuilder(CurrentEntity, CurrentEntityNameCamelCase)
+        .where(`${CurrentEntityNameCamelCase}.id = :id`, sth)
+
+      allRelationsSqb = CurrentEntity.addLeftJoinAndSelect(allRelationsSqb)
+
+      newObj = await allRelationsSqb.getOne()
+    } else {
+      // normalize entity and all children
+      newObj = new CurrentEntity()
+      Object.assign(newObj, sth)
+
+      if (shouldCheckRelations) {
+        if (sth.multiaddrs !== undefined) {
+          newObj.multiaddrs = []
+
+          for (const element of (sth.multiaddrs as any[])) {
+            if (typeof element === "string") {
+              const multiaddrString: string = element
+
+              newObj.multiaddrs.push(await MultiaddrEntity.normalize({
+                peerInfoId: sth.id,
+                addrString: multiaddrString
+              }))
+            } else {
+              newObj.multiaddrs.push(await MultiaddrEntity.normalize(element))
+            }
+          }
+        }
       }
-    })
-
-    const newObj = new PeerInfoEntity()
-    Object.assign(newObj, sth)
-
-    if (sth.multiaddrs !== undefined) {
-      const normalizedMultiaddrs = []
-      for (const element of (sth.multiaddrs as any[])) {
-        assertType(element, "string", EntityValueError, "PeerInfoEntity.multiaddrs[]")
-        const multiaddrString: string = element
-
-        normalizedMultiaddrs.push(await MultiaddrEntity.fromObject({
-          peerInfoId: sth.id,
-          multiaddrString: multiaddrString
-        }))
-      }
-
-      newObj.multiaddrs = normalizedMultiaddrs
     }
+
+    // do other necessary normalization
 
     return newObj
   }
@@ -73,3 +114,5 @@ export class PeerInfoEntity extends BaseEntity {
     return newObj
   }
 }
+
+initCurrentEntity()

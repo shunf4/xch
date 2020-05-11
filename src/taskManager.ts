@@ -25,6 +25,10 @@ export class Task {
   description: string
   func: Function
   args: any[]
+  private finishedDeferred: DeferredPromise<any>
+  get finishedPromise(): Promise<any> {
+    return this.finishedDeferred.promise
+  }
 
   constructor({ description, func, args }: { func: Function, description?: string, args?: any[] }, ...extraArgs: any[])
   constructor(func: Function, ...extraArgs: any[])
@@ -43,17 +47,25 @@ export class Task {
     this.description = description ? description : func.name
     this.func = func
     this.args = args ? args : extraArgs
+    this.finishedDeferred = createDeferredPromise()
   }
 
-  async run(): Promise<any> {
+  async run({ shouldThrowException } = { shouldThrowException: false }): Promise<any> {
     try {
-      const result = this.func(...this.args)
-      return await Promise.resolve(result) // forcily convert result to a Promise
+      const resultOrResultPromise = this.func(...this.args)
+      const result = await Promise.resolve(resultOrResultPromise) // forcily convert result to a Promise
+      this.finishedDeferred.resolve(result)
+      return result
     } catch (err) {
       if (err.stack) {
         debug.error(`Exception occurred(${err.constructor.name}) when executing task ${this.description}. Stack: ${err.stack}`)
       } else {
         debug.error(`Exception occurred(${err.constructor.name}) when executing task ${this.description}: ${err.message}`)
+      }
+
+      this.finishedDeferred.reject(err)
+      if (shouldThrowException) {
+        throw err
       }
     }
   }
@@ -67,141 +79,6 @@ interface ITaskManager {
   invalidate(func: Function): void,
 
   runAllTasks(): Promise<any>,
-}
-
-export class TaskManager {
-  private queue: Task[]
-  private idleTasks: Task[]
-  private scheduledTasks: Task[]
-  private enqueuePromiseCallbacks: (() => void)[]
-  private isSchedulerRunning: boolean
-
-  private constructor() {
-    this.queue = []
-    this.idleTasks = []
-    this.scheduledTasks = []
-    this.enqueuePromiseCallbacks = []
-    this.isSchedulerRunning = false
-  }
-
-  public static async create(): Promise<TaskManager> {
-    const newTaskManager = new TaskManager()
-    newTaskManager.startScheduler()
-    return newTaskManager
-  }
-
-  
-  private enqueueSchedulerTasks(): void {
-    this.enqueue(new Task({ func: this.runScheduledTasks.bind(this), description: "__ScheduledTasks__" }))
-  }
-
-  startScheduler(): void {
-    if (!this.isSchedulerRunning) {
-      this.isSchedulerRunning = true
-      this.enqueueSchedulerTasks()
-    }
-  }
-
-  stopScheduler(): void {
-    // if called from within queue, upcoming __ScheduledTasks__ will still run
-    if (this.isSchedulerRunning) {
-      this.queue = this.queue.filter((task) => {
-        return !(task.description === "__ScheduledTasks__")
-      })
-      this.isSchedulerRunning = false
-    }
-  }
-
-  registerIdleTask(idleTask: Task): void {
-    if (!this.idleTasks.includes(idleTask)) {
-      this.idleTasks.push(idleTask)
-    }
-  }
-
-  unregisterIdleTask(idleTask: Task): void {
-    const index = this.idleTasks.indexOf(idleTask)
-    if (index === -1) {
-      throw Error(`cannot unregister task: "${idleTask.description}": not registered`)
-    }
-
-    this.idleTasks.splice(index, 1)
-  }
-
-  registerScheduledTask(scheduledTask: Task): void {
-    if (!this.scheduledTasks.includes(scheduledTask)) {
-      this.scheduledTasks.push(scheduledTask)
-    }
-  }
-
-  unregisterScheduledTask(scheduledTask: Task): void {
-    const index = this.scheduledTasks.indexOf(scheduledTask)
-    if (index === -1) {
-      throw Error(`cannot unregister task: "${scheduledTask.description}": not registered`)
-    }
-
-    this.scheduledTasks.splice(index, 1)
-  }
-
-  isQueueEmpty(): boolean {
-    return this.queue.length === 0
-  }
-
-  getEnqueuePromise(): Promise<void> {
-    const result: Promise<void> = new Promise((resolve) => this.enqueuePromiseCallbacks.push(resolve))
-
-    return result
-  }
-
-  enqueue(task: Task): void
-  enqueue(func: Function): void
-  
-  enqueue(sth: any): void {
-    if (!sth) return
-
-    if (!(sth instanceof Task || sth instanceof Function)) return
-
-    if (sth instanceof Task) {
-      const task = sth as Task
-      if (!this.queue.includes(task)) {
-        this.queue.push(task)
-      }
-    }
-
-    if (sth instanceof Function) {
-      const func = sth as Function
-      this.queue.push(new Task({ func: func }))
-    }
-
-    const enqueuePromiseCallbacks = this.enqueuePromiseCallbacks
-    this.enqueuePromiseCallbacks = []
-    enqueuePromiseCallbacks.forEach((cb) => {
-      cb() // FIXME: setImmediate will be better?
-    })
-  }
-
-  dequeue(): Task {
-    return this.queue.shift()
-  }
-
-  async runIdleTasks(): Promise<void> {
-    for (const task of this.idleTasks) {
-      await task.run()
-    }
-  }
-
-  async runScheduledTasks(): Promise<void> {
-    for (const task of this.scheduledTasks) {
-      await task.run()
-    }
-    
-    if (this.isSchedulerRunning) {
-      setTimeout(() => { this.enqueueSchedulerTasks() }, Constants.ScheduledTaskTime)
-    }
-  }
-
-  async start(): Promise<void> {
-    this.startScheduler()
-  }
 }
 
 // A QueueTaskManager runs tasks sequentially and removes them after running(if shouldDeleteTaskAfterRun is true).

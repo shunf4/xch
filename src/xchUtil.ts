@@ -3,6 +3,16 @@ import __ from "underscore"
 import { RuntimeLogicError, TimeoutError } from "./errors"
 import { Arguments } from "yargs"
 import { TelephoneMessage } from "./telephone"
+import util from "util"
+
+export type NonFunctionProperties<T> = {
+  [P in keyof T]?: T[P] extends Function ? never : P
+}[keyof T]
+
+export type TypelessPartial<T> = {
+  [P in NonFunctionProperties<T>]?: any
+}
+
 
 export async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -186,12 +196,24 @@ export function passesAssertion(func, ...args): boolean {
   return true
 }
 
+export function isUndefinedOrNonEmptyString(s: string | undefined): boolean {
+  return s !== "" || s === undefined
+}
+
 export function stringIsEmpty(s: string): boolean {
   return s === ""
 }
 
 export function stringIsNotEmpty(s: string): boolean {
   return s !== ""
+}
+
+export function equalTo(arg: any): (sth: any) => boolean {
+  return wrapAsNamedFunction(
+    (sth: any): boolean => sth === arg,
+    arguments.callee.name,
+    Array.from(arguments)
+  )
 }
 
 export function greaterThan(num: number): (numArg: number) => boolean {
@@ -336,4 +358,15 @@ export function createTimingOutSource<T> (
   }
 
   return timingOutSource
+}
+
+export function coloredObjectOutput(obj: any): string {
+  return util.inspect(obj, {
+    colors: true,
+    depth: null
+  })
+}
+
+export function printObject(...objs: any[]): void {
+  console.log(...objs.map(obj => coloredObjectOutput(obj)))
 }

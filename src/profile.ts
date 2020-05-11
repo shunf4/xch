@@ -26,11 +26,15 @@ export class Profile {
    * Creates a Profile.
    * @param options options.profileDir: path to current profile directory.
    */
-  static async create({ profileDir, clear }: ProfileManagerOptions): Promise<Profile> {
+  static async create(argv: any): Promise<Profile> {
+    const {
+      profileDir = "./.xch",
+      clear = false
+    } = argv
     const profile = new Profile()
     profile.profileDir = path.resolve(profileDir)
     await profile.validate()
-    await profile.init({ clear })
+    await profile.init(argv)
 
     return profile
   }
@@ -87,7 +91,10 @@ export class Profile {
     }
   }
 
-  private async init({ clear }: { clear: string }): Promise<void> {
+  private async init(argv: any): Promise<void> {
+    const {
+      clear = ""
+    } = argv
     if (clear && (clear === "all" || clear === "profile")) {
       await Profile.removeDir(this.profileDir)
     }
@@ -123,9 +130,11 @@ export class Profile {
 
     ;({ finalConfig: this.config, createdDefaultConfig: automaticConfig } = await XchLibp2pConfig.createFromStrings(reSortedConfig))
 
-
     if (Object.keys(automaticConfig).length) {
       await fs.promises.writeFile(path.join(this.configDir, new Date().toISOString().replace(/[.:]/g, "-") + ".automatic.yaml"), automaticConfig.toString(), {encoding: "utf-8"})
     }
+
+    // override some configuration with argv
+    await this.config.merge(argv)
   }
 }

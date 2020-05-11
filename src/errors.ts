@@ -21,3 +21,6 @@ export class TelephonePeerEndedWriteError extends Error {
 
 export class TimeoutError extends Error {
 }
+
+export class GetStateInvalidArgumentError extends Error {
+}

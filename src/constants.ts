@@ -36,7 +36,14 @@ const Constants = {
   DefaultListenAddrs: ["/ip4/0.0.0.0/tcp/31789"],
 
   IdleTaskTime: 6000,
-  ScheduledTaskTime: 10000
+  ScheduledTaskTime: 10000,
+  TelephoneTimeout: 15000,
+  WillTelephoneIgnoreTimeoutWhenNotWaitingForAnswer: false,
+  DefaultCommonNormalizeOptions: {
+    checkReations: false
+  },
+  BlockPriorityCommon: 0,
+  BlockPriorityUnconfirmed: 1,
 }
 
 export default Constants

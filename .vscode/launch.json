@@ -26,17 +26,17 @@
         "${workspaceFolder}/built/**/*.js"
       ]
     },
-    {
-      "type": "node",
-      "request": "launch",
-      "name": "Launch Ttmp in JS",
-      "program": "${workspaceFolder}/built/ttmp.js",
-      "sourceMaps": false,
-      "disableOptimisticBPs": true,
-      "showAsyncStacks": true,
-      "trace": true,
-      "smartStep": false,
-    },
+    // {
+    //   "type": "node",
+    //   "request": "launch",
+    //   "name": "Launch Ttmp in JS",
+    //   "program": "${workspaceFolder}/built/ttmp.js",
+    //   "sourceMaps": false,
+    //   "disableOptimisticBPs": true,
+    //   "showAsyncStacks": true,
+    //   "trace": true,
+    //   "smartStep": false,
+    // },
     {
       "type": "node",
       "request": "launch",
@@ -45,6 +45,19 @@
         "<node_internals>/**"
       ],
       "program": "${workspaceFolder}/src/drive.ts",
+      "preLaunchTask": "tsc: build - tsconfig.json",
+      "outFiles": [
+        "${workspaceFolder}/built/**/*.js"
+      ]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch dbTest",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "program": "${workspaceFolder}/src/dbTest.ts",
       "preLaunchTask": "tsc: build - tsconfig.json",
       "outFiles": [
         "${workspaceFolder}/built/**/*.js"

@@ -2,13 +2,32 @@ import Debug from "debug-level"
 import itPipe from "it-pipe"
 import itLengthPrefixed from "it-length-prefixed"
 import { itJson } from "../xchUtil"
+import { RuntimeLogicError } from "../errors"
 
 import { Telephone, ItUpstream, TelephoneListenerFunction } from "../telephone"
 
-import AbortController from "abort-controller"
-import abortable from "abortable-iterator"
+export const debug = Debug("xch:telephone")
 
-const debug = Debug("xch:telephone")
+export function answering() {
+  return function(target: any, propertyKey: string, descriptor: PropertyDescriptor): void {
+    if (!(propertyKey.startsWith("on"))) {
+      throw new RuntimeLogicError(`${propertyKey} telephoner listener: not starting with "on"`)
+    }
+
+    let prototypeWithListeners: any = target
+    while (prototypeWithListeners.constructor.listeners === undefined) {
+      prototypeWithListeners = Object.getPrototypeOf(prototypeWithListeners)
+    }
+
+    let tag = propertyKey.slice(2)
+    tag = tag[0].toLowerCase() + tag.slice(1)
+    const telephonerConstructor: typeof BaseTelephoner = prototypeWithListeners.constructor
+    telephonerConstructor.listeners.push([
+      tag,
+      target[propertyKey]
+    ])
+  }
+}
 
 export class BaseTelephoner {
   public static listeners: [string, TelephoneListenerFunction][] = []

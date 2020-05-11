@@ -4,7 +4,7 @@ import Constants from "./constants"
 import Debug from "debug-level"
 import { KeyType } from "libp2p-crypto"
 import { ConfigValueError, ConfigTypeError } from "./errors"
-import { assertInstanceOf } from "./xchUtil"
+import { assertInstanceOf, assertType } from "./xchUtil"
 
 const debug = Debug("xch:config")
 
@@ -22,6 +22,8 @@ interface IXchLibp2pConfig {
   listenAddrs: string[],
 
   extraAccountPeerIds: PeerId[],
+
+  verifySavedBlocksOnStart: string,
 }
 
 
@@ -66,7 +68,10 @@ const XchLibp2pConfigDefaultGenerator: DefaultGenerator<IXchLibp2pConfig> = {
   },
   extraAccountPeerIds: async () => {
     return []
-  }
+  },
+  verifySavedBlocksOnStart: async () => {
+    return "mostRecent"
+  },
 }
 
 const _stringArrayNormalizer = async (input: any): Promise<string[]> => {
@@ -143,6 +148,17 @@ const XchLibp2pConfigNormalizer: Normalizer<IXchLibp2pConfig> = {
 
     return result
   },
+  verifySavedBlocksOnStart: async (input: any) => {
+    assertType(input, "string", ConfigTypeError, "config.verifySavedBlocksOnStart")
+    if (input === "off"
+      || input === "mostRecent"
+      || input === "full"
+    ) {
+      return input
+    } else {
+      throw new ConfigValueError(`invalid config.verifySavedBlocksOnStart value: ${input}`)
+    }
+  }
 }
 
 
@@ -158,6 +174,7 @@ export class XchLibp2pConfig implements IXchLibp2pConfig {
   libp2pConfig: any
   listenAddrs: string[]
   extraAccountPeerIds: PeerId[]
+  verifySavedBlocksOnStart: string
 
   toString(): string {
     return YAML.stringify(this)
@@ -205,6 +222,26 @@ export class XchLibp2pConfig implements IXchLibp2pConfig {
     return {
       finalConfig: config,
       createdDefaultConfig
+    }
+  }
+
+  async merge(overridingConfig: any): Promise<void> {
+    for (const [k, v] of Object.entries(overridingConfig)) {
+      if (XchLibp2pConfigNormalizer[k] === undefined) {
+        // throw new ConfigTypeError(`invalid configuration key: ${k}`)
+        continue
+      }
+
+      if (Object.prototype.hasOwnProperty.call(this, k)) {
+        continue
+      }
+
+      try {
+        this[k] = await XchLibp2pConfigNormalizer[k](v)
+      } catch (err) {
+        debug.error(`invalid value of config "${k}": ${err.message}`)
+        throw err
+      }
     }
   }
 }

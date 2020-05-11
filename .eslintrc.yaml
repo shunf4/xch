@@ -28,7 +28,7 @@
           delimiter: "comma"
           requireLast: true
     "@typescript-eslint/interface-name-prefix":
-      - warn
+      - off
     "@typescript-eslint/no-empty-interface": off
     "@typescript-eslint/no-empty-function": off
     "@typescript-eslint/no-floating-promises":
@@ -37,10 +37,8 @@
         ignoreVoid: true
     "@typescript-eslint/no-explicit-any": off
     "@typescript-eslint/no-this-alias":
-      - error
-      -
-        allowDestructuring: true
-        allowedNames: ['that']
+      - warn
     "prefer-rest-params": off
+    "@typescript-eslint/no-use-before-define": warn
   env:
     node: true

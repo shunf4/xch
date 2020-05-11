@@ -30,6 +30,13 @@ async function readArgv(): Promise<any> {
 
 async function initDb({ profile }: { profile: Profile }): Promise<void> {
   const connectionOptions = await getConnectionOptions()
+  if (process[Symbol.for("ts-node.register.instance")] !== undefined) {
+    Object.assign(connectionOptions, {
+      entities: connectionOptions["tsEntities"],
+      migrations: connectionOptions["tsMigrations"],
+      subscribers: connectionOptions["tsSubscribers"],
+    })
+  }
   Object.assign(connectionOptions, {
     database: path.join(profile.profileDir, "database_gengen.db")
   })
@@ -69,13 +76,12 @@ async function main(): Promise<void> {
       transactions: [],
       stateHash: generateSpecialId(0),
       signature: generateSpecialId(0),
-      transactionsHash: generateSpecialId(0),
       accountStateSnapshots: []
     }
 
     let seqInBlock = 0
     for (const peerId of [profile.config.peerId, ...profile.config.extraAccountPeerIds]) {
-      genesisBlockObj.transactions.push(await Transaction.fromObject({
+      genesisBlockObj.transactions.push(await Transaction.normalize({
         hash: generateSpecialId(seqInBlock),
         seqInBlock: seqInBlock,
         type: "transfer",
@@ -91,7 +97,7 @@ async function main(): Promise<void> {
       seqInBlock++
     }
 
-    const genesisBlock = await Block.fromObject(genesisBlockObj)
+    const genesisBlock = await Block.normalize(genesisBlockObj)
 
     {
       const f = await fs.promises.open("./testGenesisBlock.json", "w")
@@ -106,7 +112,7 @@ async function main(): Promise<void> {
       const x = JSON.parse(await f.readFile({
         encoding: "utf-8"
       }))
-      console.log(await Block.fromObject(x))
+      console.log(await Block.normalize(x))
     }
 
     await genesisBlock.save()
