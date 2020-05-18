@@ -43,7 +43,10 @@ const Constants = {
     checkReations: false
   },
   BlockPriorityCommon: 0,
-  BlockPriorityUnconfirmed: 1,
+  BlockPriorityTemporary: 1,
+  DposBeginningTime: new Date("2020-01-01T00:00:00.000Z"),
+  DposSlotDurationMillisec: 60000,
+  DposWitnessNumber: 5,
 }
 
 export default Constants

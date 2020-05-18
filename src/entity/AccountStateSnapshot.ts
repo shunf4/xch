@@ -3,9 +3,9 @@ import { EntityNotFoundError } from "typeorm/error/EntityNotFoundError"
 import { Transaction } from "./Transaction"
 import { Block } from "./Block"
 import { Role } from "./Role"
-import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo, assertTypeOrInstanceOf, passesAssertion, isJsonSerializable, isUndefinedOrNonEmptyString, TypelessPartial, NonFunctionProperties } from "../xchUtil"
-import { EntityValueError } from "../errors"
-import { validateEntity } from "./common"
+import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo, assertTypeOrInstanceOf, passesAssertion, isJsonSerializable, isUndefinedOrNonEmptyString, TypelessPartial, NonFunctionProperties, fullObjectOutput, isNotNullNorUndefined } from "../xchUtil"
+import { EntityValueError, RuntimeLogicError } from "../errors"
+import { validateEntity, findOneWithAllRelationsOrFail } from "./common"
 import multihash from "multihashes"
 import multihashing from "multihashing"
 import objectHash from "object-hash"
@@ -38,11 +38,22 @@ export class AccountStateSnapshot {
   state: any
 
   @ManyToMany(type => Block, block => block.mostRecentAssociatedAccountStateSnapshots)
-  mostRecentAssociatedBlock: Block
+  mostRecentAssociatedBlocks: Block[]
 
   @ManyToMany(type => Role, role => role.account, { cascade: true })
   @JoinTable()
   roles: Role[]
+
+  public isEquivalentToNewlyCreated(): boolean {
+    if (this.roles === undefined) {
+      throw new RuntimeLogicError(`AccountStateSnapshot.roles is not expanded`)
+    }
+
+    return this.nonce === 0
+      && this.balance === 0
+      && objectHash(this.state, { algorithm: "sha256", encoding: "hex" }) === objectHash({}, { algorithm: "sha256", encoding: "hex" })
+      && this.roles.length === 0
+  }
 
   public static addLeftJoinAndSelect<ET>(qb: SelectQueryBuilder<ET>): SelectQueryBuilder<ET> {
     let currentJoined = qb
@@ -53,12 +64,8 @@ export class AccountStateSnapshot {
     return currentJoined
   }
 
-  public static async findOneWithAllRelations(sth: TypelessPartial<CurrentEntity>): Promise<CurrentEntity> {
-    return await CurrentEntity.normalize(sth, {
-      shouldCheckRelations: false,
-      shouldLoadRelationsIfUndefined: true,
-      shouldValidate: false,
-    })
+  public static async findOneWithAllRelationsOrFail(condition: TypelessPartial<CurrentEntity>): Promise<CurrentEntity> {
+    return await findOneWithAllRelationsOrFail(getCurrentEntityConstructor, CurrentEntityNameCamelCase, condition)
   }
 
   public static async normalize(sth: TypelessPartial<CurrentEntity>, {
@@ -84,7 +91,7 @@ export class AccountStateSnapshot {
         [false, "balance", assertCondition, greaterThanOrEqualTo(0)],
         [false, "state", assertType, "object"],
         [false, "state", assertCondition, isJsonSerializable],
-        [false, "mostRecentAssociatedBlock", assertType, ["undefined", "object"]],
+        [false, "mostRecentAssociatedBlocks", assertTypeOrInstanceOf, ["undefined", Array]],
 
         [false, "roles", assertTypeOrInstanceOf, ["undefined", Array]],
       ])
@@ -97,16 +104,11 @@ export class AccountStateSnapshot {
       sth.roles === undefined
     )) {
       // reload entity with relations
-      let allRelationsSqb = getConnection()
-        .createQueryBuilder(CurrentEntity, CurrentEntityNameCamelCase)
-        .where(`${CurrentEntityNameCamelCase}.hash = :hash`, sth)
+      assertCondition(sth.hash, isNotNullNorUndefined, EntityValueError, `${CurrentEntity.name}.hash`)
 
-      allRelationsSqb = CurrentEntity.addLeftJoinAndSelect(allRelationsSqb)
-
-      newObj = await allRelationsSqb.getOne()
-      if (newObj === undefined) {
-        throw new EntityNotFoundError(CurrentEntity, `hash: ${sth.hash}`)
-      }
+      newObj = await CurrentEntity.findOneWithAllRelationsOrFail({
+        hash: sth.hash
+      })
     } else {
       // normalize entity and all children
       newObj = new CurrentEntity()
@@ -141,11 +143,11 @@ export class AccountStateSnapshot {
     const hasher = multihashing.createHash("sha2-256")
     hasher.update(Buffer.from(obj.pubKey, "utf-8"))
 
-    const tmpBuffer = Buffer.alloc(8)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.nonce))
-    hasher.update(tmpBuffer)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.balance))
-    hasher.update(tmpBuffer)
+    const tempBuffer = Buffer.alloc(8)
+    tempBuffer.writeBigInt64BE(BigInt(obj.nonce))
+    hasher.update(tempBuffer)
+    tempBuffer.writeBigInt64BE(BigInt(obj.balance))
+    hasher.update(tempBuffer)
     hasher.update(objectHash(obj.state, { algorithm: "sha256", encoding: "buffer" }))
 
     const rolesHasher = multihashing.createHash("sha2-256")

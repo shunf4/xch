@@ -4,6 +4,7 @@ import { RuntimeLogicError, TimeoutError } from "./errors"
 import { Arguments } from "yargs"
 import { TelephoneMessage } from "./telephone"
 import util from "util"
+import Constants from "./constants"
 
 export type NonFunctionProperties<T> = {
   [P in keyof T]?: T[P] extends Function ? never : P
@@ -360,7 +361,14 @@ export function createTimingOutSource<T> (
   return timingOutSource
 }
 
-export function coloredObjectOutput(obj: any): string {
+export function fullObjectOutput(obj: any): string {
+  return util.inspect(obj, {
+    colors: false,
+    depth: null
+  })
+}
+
+export function coloredFullObjectOutput(obj: any): string {
   return util.inspect(obj, {
     colors: true,
     depth: null
@@ -368,5 +376,5 @@ export function coloredObjectOutput(obj: any): string {
 }
 
 export function printObject(...objs: any[]): void {
-  console.log(...objs.map(obj => coloredObjectOutput(obj)))
+  console.log(...objs.map(obj => coloredFullObjectOutput(obj)))
 }

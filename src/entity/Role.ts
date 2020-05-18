@@ -1,9 +1,9 @@
 import { Entity, Column, PrimaryColumn, ManyToMany, getConnection, SelectQueryBuilder } from "typeorm"
 import { EntityNotFoundError } from "typeorm/error/EntityNotFoundError"
 import { Block } from "./Block"
-import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo, assertTypeOrInstanceOf, passesAssertion, isJsonSerializable, isUndefinedOrNonEmptyString, TypelessPartial } from "../xchUtil"
+import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo, assertTypeOrInstanceOf, passesAssertion, isJsonSerializable, isUndefinedOrNonEmptyString, TypelessPartial, fullObjectOutput, isNotNullNorUndefined } from "../xchUtil"
 import { EntityValueError } from "../errors"
-import { validateEntity } from "./common"
+import { validateEntity, findOneWithAllRelationsOrFail } from "./common"
 import multihashing from "multihashing"
 import multihash from "multihashes"
 import { AccountStateSnapshot } from "./AccountStateSnapshot"
@@ -36,12 +36,8 @@ export class Role {
     return qb
   }
 
-  public static async findOneWithAllRelations(sth: TypelessPartial<CurrentEntity>): Promise<CurrentEntity> {
-    return await CurrentEntity.normalize(sth, {
-      shouldCheckRelations: false,
-      shouldLoadRelationsIfUndefined: true,
-      shouldValidate: false
-    })
+  public static async findOneWithAllRelationsOrFail(condition: TypelessPartial<CurrentEntity>): Promise<CurrentEntity> {
+    return await findOneWithAllRelationsOrFail(getCurrentEntityConstructor, CurrentEntityNameCamelCase, condition)
   }
 
   public static async normalize(sth: TypelessPartial<CurrentEntity>, {
@@ -67,17 +63,11 @@ export class Role {
       false // no relations.
     )) {
       // reload entity with relations
-      let allRelationsSqb = getConnection()
-        .createQueryBuilder(CurrentEntity, CurrentEntityNameCamelCase)
-        .where(`${CurrentEntityNameCamelCase}.hash = :hash`, sth)
+      assertCondition(sth.hash, isNotNullNorUndefined, EntityValueError, `${CurrentEntity.name}.hash`)
 
-      allRelationsSqb = CurrentEntity.addLeftJoinAndSelect(allRelationsSqb)
-
-      newObj = await allRelationsSqb.getOne()
-
-      if (newObj === undefined) {
-        throw new EntityNotFoundError(CurrentEntity, `hash: ${sth.hash}`)
-      }
+      newObj = await CurrentEntity.findOneWithAllRelationsOrFail({
+        hash: sth.hash
+      })
     } else {
       // normalize entity and all children
       newObj = new CurrentEntity()
@@ -102,9 +92,9 @@ export class Role {
     const hasher = multihashing.createHash("sha2-256")
     hasher.update(Buffer.from(this.name, "utf-8"))
 
-    const tmpBuffer = Buffer.alloc(8)
-    tmpBuffer.writeBigInt64BE(BigInt(this.score))
-    hasher.update(tmpBuffer)
+    const tempBuffer = Buffer.alloc(8)
+    tempBuffer.writeBigInt64BE(BigInt(this.score))
+    hasher.update(tempBuffer)
 
     const resultBuffer: Buffer = multihash.encode(hasher.digest(), "sha2-256")
 

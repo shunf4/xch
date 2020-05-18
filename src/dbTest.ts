@@ -268,7 +268,7 @@ async function main1() {
   await secondBlock.save()
 
   {
-    const requery = await Block.findOneWithAllRelations({
+    const requery = await Block.findOneWithAllRelationsOrFail({
       hash: generateSpecialId(0)
     })
 
@@ -283,7 +283,7 @@ async function main1() {
   }
 
   {
-    const requery = await Block.findOneWithAllRelations({
+    const requery = await Block.findOneWithAllRelationsOrFail({
       hash: generateSpecialId(1)
     })
 
@@ -517,7 +517,39 @@ async function main2() {
     await b.save()
   }
 
-  printObject(await itAll(await b0.getState({
-    shouldIncludeUnconfirmed: true,
+  printObject(await itAll(await Block.getState({
+    shouldIncludeTemporary: false,
+  })))
+
+  printObject(await Block.find())
+
+  const temporaryBlock = await Block.findOneWithAllRelationsOrFail({
+    priority: Constants.BlockPriorityTemporary,
+    height: -1,
+  })
+
+  printObject(await Block.getFirstSpecificState({
+    shouldIncludeTemporary: false,
+    specificPubKey: 'C',
+    shouldCreateIfNotFound: true,
+    targetBlockToCreateIn: temporaryBlock,
+  }))
+
+  temporaryBlock.mostRecentAssociatedAccountStateSnapshots.splice(0, 2)
+
+  printObject(temporaryBlock)
+  await temporaryBlock.calcHash({
+    encoding: "buffer",
+    shouldAssignHash: true,
+    shouldAssignExistingHash: false,
+    shouldUseExistingAssHash: true,
+    shouldUseExistingChildHash: true, 
+    shouldUseExistingStateHash: false,
+  })
+  printObject(temporaryBlock)
+  await temporaryBlock.saveOverwritingSamePriorityAndHeight()
+
+  printObject(await itAll(await Block.getState({
+    shouldIncludeTemporary: true,
   })))
 }

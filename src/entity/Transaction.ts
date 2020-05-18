@@ -1,12 +1,14 @@
 import { Entity, Index, Column, PrimaryColumn, ManyToOne, SelectQueryBuilder, getConnection } from "typeorm"
 import { EntityNotFoundError } from "typeorm/error/EntityNotFoundError"
 import { Block } from "./Block"
-import { assertType, assertCondition, stringIsNotEmpty, greaterThanOrEqualTo, assertInstanceOf, isJsonSerializable, isNotNullNorUndefined, assertTypeOrInstanceOf, isUndefinedOrNonEmptyString, TypelessPartial } from "../xchUtil"
+import { assertType, assertCondition, stringIsNotEmpty, greaterThanOrEqualTo, assertInstanceOf, isJsonSerializable, isNotNullNorUndefined, assertTypeOrInstanceOf, isUndefinedOrNonEmptyString, TypelessPartial, fullObjectOutput } from "../xchUtil"
 import { EntityValueError } from "../errors"
-import { validateEntity } from "./common"
+import { validateEntity, findOneWithAllRelationsOrFail } from "./common"
 import multihashing from "multihashing"
 import multihash from "multihashes"
 import objectHash from "object-hash"
+import { BaseTransactionHandler, ITransactionVerifyOptions } from "../transactonHandlers/base"
+import { Transfer } from "../transactonHandlers/transfer"
 
 const getCurrentEntityConstructor = () => Transaction
 type CurrentEntityConstructor = (typeof getCurrentEntityConstructor) extends () => infer R ? R : any
@@ -57,16 +59,16 @@ export class Transaction {
   @Column("simple-json")
   extraData: any
 
+  private static handlers: Record<string, BaseTransactionHandler> = {
+    "transfer": new Transfer(),
+  }
+
   public static addLeftJoinAndSelect<ET>(qb: SelectQueryBuilder<ET>): SelectQueryBuilder<ET> {
     return qb
   }
 
-  public static async findOneWithAllRelations(sth: TypelessPartial<CurrentEntity>): Promise<CurrentEntity> {
-    return await CurrentEntity.normalize(sth, {
-      shouldCheckRelations: false,
-      shouldLoadRelationsIfUndefined: true,
-      shouldValidate: false,
-    })
+  public static async findOneWithAllRelationsOrFail(condition: TypelessPartial<CurrentEntity>): Promise<CurrentEntity> {
+    return await findOneWithAllRelationsOrFail(getCurrentEntityConstructor, CurrentEntityNameCamelCase, condition)
   }
 
   public static async normalize(sth: TypelessPartial<CurrentEntity>, {
@@ -108,17 +110,11 @@ export class Transaction {
       false // no relations
     )) {
       // reload entity with relations
-      let allRelationsSqb = getConnection()
-        .createQueryBuilder(CurrentEntity, CurrentEntityNameCamelCase)
-        .where(`${CurrentEntityNameCamelCase}.hash = :hash`, sth)
+      assertCondition(sth.hash, isNotNullNorUndefined, EntityValueError, `${CurrentEntity.name}.hash`)
 
-      allRelationsSqb = CurrentEntity.addLeftJoinAndSelect(allRelationsSqb)
-
-      newObj = await allRelationsSqb.getOne()
-
-      if (newObj === undefined) {
-        throw new EntityNotFoundError(CurrentEntity, `hash: ${sth.hash}`)
-      }
+      newObj = await CurrentEntity.findOneWithAllRelationsOrFail({
+        hash: sth.hash
+      })
     } else {
       // normalize entity and all children
       newObj = new CurrentEntity()
@@ -141,29 +137,34 @@ export class Transaction {
     return newObj
   }
 
+  public async calcHash(options: {
+    encoding: "hex",
+    shouldAssignHash: boolean,
+  }): Promise<string> 
+  public async calcHash(options: {
+    encoding: "buffer",
+    shouldAssignHash: boolean,
+  }): Promise<Buffer> 
   public async calcHash({
     encoding = "hex",
     shouldAssignHash = false,
-    shouldUseExistingHash = true,
-    shouldAssignExistingHash = false,
-    shouldUseExistingAssHash = true,
   }): Promise<any> {
     const obj: Transaction = this
 
     const hasher = multihashing.createHash("sha2-256")
 
-    const tmpBuffer = Buffer.alloc(8)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.seqInBlock))
-    hasher.update(tmpBuffer)
+    const tempBuffer = Buffer.alloc(8)
+    tempBuffer.writeBigInt64BE(BigInt(obj.seqInBlock))
+    hasher.update(tempBuffer)
     hasher.update(Buffer.from(obj.type, "utf-8"))
-    tmpBuffer.writeBigInt64BE(BigInt(obj.nonce))
-    hasher.update(tmpBuffer)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.amount))
-    hasher.update(tmpBuffer)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.fee))
-    hasher.update(tmpBuffer)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.timestamp.getTime()))
-    hasher.update(tmpBuffer)
+    tempBuffer.writeBigInt64BE(BigInt(obj.nonce))
+    hasher.update(tempBuffer)
+    tempBuffer.writeBigInt64BE(BigInt(obj.amount))
+    hasher.update(tempBuffer)
+    tempBuffer.writeBigInt64BE(BigInt(obj.fee))
+    hasher.update(tempBuffer)
+    tempBuffer.writeBigInt64BE(BigInt(obj.timestamp.getTime()))
+    hasher.update(tempBuffer)
     hasher.update(Buffer.from(obj.sender, "utf-8"))
     hasher.update(Buffer.from(obj.recipient, "utf-8"))
     hasher.update(objectHash(obj.extraData, { algorithm: "sha256", encoding: "buffer" }))
@@ -178,16 +179,21 @@ export class Transaction {
     }
   }
 
-  public async apply({
-    currentBlock,
-    nextBlock,
-  }: {
-    currentBlock: Block,
-    nextBlock: Block,
+  public async apply(options: {
+    baseBlock: Block,
+    targetBlock: Block,
   }): Promise<void> {
-    if (this.type === "transfer") {
-      const sender = await currentBlock.getFirstSpecificState
-    }
+    await Transaction.handlers[this.type].apply({
+      ...options,
+      transaction: this,
+    })
+  }
+
+  public async verify(options: Omit<ITransactionVerifyOptions, "transaction">): Promise<void> {
+    await Transaction.handlers[this.type].verify({
+      ...options,
+      transaction: this,
+    })
   }
 }
 

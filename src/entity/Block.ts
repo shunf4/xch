@@ -1,14 +1,17 @@
 import { Entity, Column, PrimaryColumn, Index, OneToMany, ManyToMany, ManyToOne, BaseEntity, JoinTable, getConnection, createQueryBuilder, SelectQueryBuilder } from "typeorm"
 import { EntityNotFoundError } from "typeorm/error/EntityNotFoundError"
 import { Transaction } from "./Transaction"
-import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo, assertTypeOrInstanceOf, passesAssertion, printObject, isUndefinedOrNonEmptyString, TypelessPartial, equalTo } from "../xchUtil"
+import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo, assertTypeOrInstanceOf, passesAssertion, printObject, isUndefinedOrNonEmptyString, TypelessPartial, equalTo, fullObjectOutput, isNotNullNorUndefined } from "../xchUtil"
 import { EntityValueError, GetStateInvalidArgumentError } from "../errors"
 import { AccountStateSnapshot } from "./AccountStateSnapshot"
-import { validateEntity } from "./common"
+import { validateEntity, findOneWithAllRelationsOrFail } from "./common"
 import multihashing from "multihashing"
 import multihash from "multihashes"
 import Debug from "debug-level"
 import Constants from "../constants"
+import PeerId from "peer-id"
+import { Role } from "./Role"
+import { Dpos } from "../dpos"
 
 const debug = Debug("xch:orm:Block")
 
@@ -24,6 +27,7 @@ function initCurrentEntity(): void {
 
 @Entity()
 @Index(["hash"], { unique: true })
+@Index(["priority", "height"], { unique: true })
 export class Block extends BaseEntity {
 
   @PrimaryColumn()
@@ -53,7 +57,7 @@ export class Block extends BaseEntity {
   @OneToMany(type => Transaction, transaction => transaction.block, { cascade: true })
   transactions: Transaction[]
 
-  @ManyToMany(type => AccountStateSnapshot, accountStateSnapShot => accountStateSnapShot.mostRecentAssociatedBlock, { cascade: true })
+  @ManyToMany(type => AccountStateSnapshot, accountStateSnapShot => accountStateSnapShot.mostRecentAssociatedBlocks, { cascade: true })
   @JoinTable()
   mostRecentAssociatedAccountStateSnapshots: AccountStateSnapshot[]
 
@@ -113,12 +117,16 @@ export class Block extends BaseEntity {
     }
   }
 
-  public static async findOneWithAllRelations(sth: TypelessPartial<CurrentEntity>): Promise<CurrentEntity> {
-    return await CurrentEntity.normalize(sth, {
-      shouldCheckRelations: false,
-      shouldLoadRelationsIfUndefined: true,
-      shouldValidate: false,
+  public static async findOneWithAllRelationsOrFail(condition: TypelessPartial<CurrentEntity>): Promise<CurrentEntity> {
+    return await findOneWithAllRelationsOrFail(getCurrentEntityConstructor, CurrentEntityNameCamelCase, condition)
+  }
+
+  public async saveOverwritingSamePriorityAndHeight(): Promise<void> {
+    await Block.delete({
+      priority: this.priority,
+      height: this.height,
     })
+    await this.save()
   }
 
   public static async normalize(sth: TypelessPartial<CurrentEntity>, {
@@ -173,18 +181,11 @@ export class Block extends BaseEntity {
       || sth.mostRecentAssociatedAccountStateSnapshots === undefined
     )) {
       // reload entity with relations
-      let allRelationsSqb = getConnection()
-        .createQueryBuilder(CurrentEntity, CurrentEntityNameCamelCase)
-        .where(`${CurrentEntityNameCamelCase}.hash = :hash`, sth)
+      assertCondition(sth.hash, isNotNullNorUndefined, EntityValueError, `${CurrentEntity.name}.hash`)
 
-      allRelationsSqb = CurrentEntity.addLeftJoinAndSelect(allRelationsSqb)
-
-      newObj = await allRelationsSqb.getOne()
-
-      if (newObj === undefined) {
-        throw new EntityNotFoundError(CurrentEntity, `hash: ${sth.hash}`)
-      }
-      await newObj.reorder()
+      newObj = await CurrentEntity.findOneWithAllRelationsOrFail({
+        hash: sth.hash
+      })
     } else {
       // normalize entity and all children
       newObj = new CurrentEntity()
@@ -234,40 +235,175 @@ export class Block extends BaseEntity {
     return this
   }
 
+  public async verifyAllButState({
+    genesisBlock,
+    expectedPrevHash,
+    expectedHeight,
+  }: {
+    genesisBlock: Block,
+    expectedPrevHash: string,
+    expectedHeight: number,
+  }): Promise<void> {
+    // 0. verify hash and whether genesis
+    const expectedHash = await this.calcHash({
+      encoding: "hex",
+      shouldAssignExistingHash: false,
+      shouldAssignHash: false,
+      shouldUseExistingChildHash: true,
+      shouldUseExistingStateHash: true,
+    })
+    if (expectedHash !== this.hash) {
+      throw new BlockVerificationHashError(`verify block(${this.priority}, ${this.height}): hash mismatch: ${this.hash} (expected ${expectedHash})`)
+    }
+
+    if (expectedHash === genesisBlock.hash) {
+      return
+    }
+
+    // 1. verify this block's prevHash and height
+    if (this.prevHash !== expectedPrevHash) {
+      throw new BlockVerificationPrevHashError(`verify block(${this.priority}, ${this.height}): prevHash mismatch: ${this.prevHash} (expected ${expectedPrevHash})`)
+    }
+
+    if (this.height !== expectedHeight) {
+      throw new BlockVerificationHeightError(`verify block(${this.priority}, ${this.height}): height mismatch (expected ${expectedHeight})`)
+    }
+
+    // 2. verify signature
+    const peerId = await PeerId.createFromPrivKey(this.generator)
+    const blockVerifySignResult = await peerId.pubKey.verify(Buffer.from(this.hash, "hex"), Buffer.from(this.signature, "hex"))
+    if (blockVerifySignResult === false) {
+      throw new BlockVerificationSignatureError(`verify block(${this.priority}, ${this.height}): signature incorrect`)
+    }
+
+    // 3. verify version
+    if (this.version !== 1) {
+      throw new BlockVerificationVersionError(`verify block(${this.priority}, ${this.height}): invalid version: ${this.version} (expected ${1})`)
+    }
+
+    // 4.verify slot
+    const blockEpochAndSlot = Dpos.getEpochAndSlot(this.timestamp)
+    const currentEpochAndSlot = Dpos.getEpochAndSlot(new Date())
+    if (currentEpochAndSlot.accumulatedSlot < blockEpochAndSlot.accumulatedSlot) {
+      throw new BlockVerificationSlotError(`verify block(${this.priority}, ${this.height}): slot error: ${this.timestamp}'s slot: (${blockEpochAndSlot.epoch}, ${blockEpochAndSlot.slot}), current: (${currentEpochAndSlot.epoch}, ${currentEpochAndSlot.slot})`)
+    }
+
+    // 5. verify slot and witness
+    await Dpos.verifyWitness({
+      block: this,
+    })
+
+    // 6. verify transactions
+    for (const [i, transaction] of this.transactions.entries()) {
+      await transaction.verify({
+        blockTimestamp: this.timestamp,
+        expectedSeqInBlock: i,
+      })
+    }
+  }
+
+  public async clearAndSave(): Promise<void> {
+    this.timestamp = new Date(0),
+    this.prevHash = ""
+    this.mineReward = 0
+    this.generator = ""
+    this.transactions = []
+    this.mostRecentAssociatedAccountStateSnapshots = []
+    this.signature = ""
+    this.hash = ""
+    this.stateHash = ""
+
+    await this.saveOverwritingSamePriorityAndHeight()
+  }
+
   public async test1() {
     printObject("getAssHashes:", await this.getAssHashes())
     printObject("getState:", await this.getState())
   }
 
-  public async * getAssHashes(): AsyncGenerator<string> {
-    const pageSize = 10
-    let currentOffset = 0
-    while (true) {
-      const currentQb = createQueryBuilder()
+  public static getAssPubKeysAndHashesSqlSubquerFunction<T>({
+    maxBlockHeight = undefined as undefined | number,
+    maxPriority = undefined as undefined | number,
+    specificPubKey = undefined as undefined | string,
+    offset = undefined as undefined | number,
+    limit = undefined as undefined | number,
+  } = {}): (qb: SelectQueryBuilder<T>) => SelectQueryBuilder<unknown> {
+    return (qb): SelectQueryBuilder<unknown> =>
+      qb
         .select("ass.pubKey", "pubKey")
         .addSelect("ass.hash", "hash")
         .addSelect("MAX(block.height)", "maxBlockHeight")
         .addSelect("maxBlockPriority", "maxBlockPriority")
-        .from(subQb => 
-          subQb
+        .from(subQb => {
+          let tempQb = subQb
             .select("ass.pubKey", "assByPriorityPubKey")
             .addSelect("MAX(block.priority)", "maxBlockPriority")
             .from(AccountStateSnapshot, "ass")
-            .leftJoin("ass.mostRecentAssociatedBlock", "block")
+            .leftJoin("ass.mostRecentAssociatedBlocks", "block")
             .groupBy("ass.pubKey")
-            .orderBy({
-              "ass.pubKey": "ASC"
-            })
-            .offset(currentOffset)
-            .limit(pageSize)
-        , "assByPriority")
+            .orderBy("ass.pubKey", "ASC")
+            .where(
+              maxPriority === undefined ?
+                "1 = 1"
+                : "block.priority <= :maxPriority", { maxPriority })
+            .andWhere(
+              specificPubKey === undefined ?
+                "1 = 1"
+                : "ass.pubKey = :specificPubKey", { specificPubKey })
+
+          if (offset !== undefined) {
+            tempQb = tempQb.offset(offset)
+          }
+
+          if (limit !== undefined) {
+            tempQb = tempQb.limit(limit)
+          }
+
+          return tempQb
+        }, "assByPriority")
         .innerJoin(AccountStateSnapshot, "ass", "assByPriority.assByPriorityPubKey = ass.pubKey")
-        .innerJoin("ass.mostRecentAssociatedBlock", "block", "block.priority = maxBlockPriority")
+        .innerJoin("ass.mostRecentAssociatedBlocks", "block", "block.priority = maxBlockPriority")
         .groupBy("assByPriorityPubKey")
-        .where("block.height <= :height", { height: this.height })
-        .orderBy({
-          "ass.pubKey": "ASC"
-        })
+        .where(
+          maxBlockHeight === undefined ?
+            "1 = 1"
+            : "block.height <= :maxBlockHeight", { maxBlockHeight })
+        .orderBy("ass.pubKey", "ASC")
+
+    // qb with fixed priority:
+    //
+    // currentQb = createQueryBuilder()
+    // .select("ass.pubKey", "pubKey")
+    // .addSelect("ass.hash", "hash")
+    // .addSelect("MAX(block.height)", "maxBlockHeight")
+    // .from(AccountStateSnapshot, "ass")
+    // .leftJoin("ass.mostRecentAssociatedBlocks", "block")
+    // .where((maxBlockHeight === undefined) ? "1 = 1" : "block.height <= :maxBlockHeight", { maxBlockHeight })
+    // .andWhere("block.priority = :fixedPriority", { fixedPriority: Constants.BlockPriorityCommon })
+    // .andWhere((specificPubKey === undefined) ? "1 = 1" : "ass.pubKey = :specificPubKey", { specificPubKey })
+    // .groupBy("ass.pubKey")  
+    // .offset(currentOffset)
+    // .limit(pageSize)
+    // .orderBy({
+    //   "ass.pubKey": "ASC"
+    // })
+  }
+
+  public static async * getAssHashes({
+    maxBlockHeight = undefined as undefined | number,
+    shouldIncludeTemporary = false,
+    specificPubKey = undefined as undefined | string,
+  } = {}): AsyncGenerator<string> {
+    const pageSize = 10
+    let currentOffset = 0
+    while (true) {
+      const currentQb: SelectQueryBuilder<unknown> = Block.getAssPubKeysAndHashesSqlSubquerFunction({
+        maxBlockHeight,
+        maxPriority: shouldIncludeTemporary ? Constants.BlockPriorityTemporary : Constants.BlockPriorityCommon,
+        specificPubKey,
+        offset: currentOffset,
+        limit: pageSize,
+      })(createQueryBuilder())
 
       debug.debug(`executing sql in Block.getAssHashes: ${currentQb.getQueryAndParameters()}`)
       const currentAssHashes = await currentQb.getRawMany()
@@ -284,72 +420,38 @@ export class Block extends BaseEntity {
     }
   }
 
+  public async * getAssHashes(options: {
+    maxBlockHeight?: number,
+    shouldIncludeTemporary?: boolean,
+    specificPubKey?: undefined | string,
+  } = {}): AsyncGenerator<string> {
+    const optionsWithHeight = Object.assign(options, {
+      maxBlockHeight: this.height,
+    })
+    yield * Block.getAssHashes(optionsWithHeight)
+  }
+
   public static async * getState({
     maxBlockHeight = undefined as undefined | number,
-    shouldIncludeUnconfirmed = false,
+    shouldIncludeTemporary = false,
     specificPubKey = undefined as undefined | string,
   } = {}): AsyncGenerator<AccountStateSnapshot> {
     const pageSize = 10
     let currentOffset = 0
     while (true) {
-      let currentQb: SelectQueryBuilder<AccountStateSnapshot>
-      
-      if (shouldIncludeUnconfirmed) {
-        currentQb = createQueryBuilder()
+      const currentQb: SelectQueryBuilder<AccountStateSnapshot> =
+        createQueryBuilder()
           .select("ass")
           .from(AccountStateSnapshot, "ass")
-          .innerJoin(subQb =>
-            subQb
-              .select("ass.pubKey", "pubKey")
-              .addSelect("ass.hash", "hash")
-              .addSelect("MAX(block.height)", "maxBlockHeight")
-              .addSelect("maxBlockPriority", "maxBlockPriority")
-              .from(subQb => 
-                subQb
-                  .select("ass.pubKey", "assByPriorityPubKey")
-                  .addSelect("MAX(block.priority)", "maxBlockPriority")
-                  .from(AccountStateSnapshot, "ass")
-                  .leftJoin("ass.mostRecentAssociatedBlock", "block")
-                  .groupBy("ass.pubKey")
-                  .orderBy({
-                    "ass.pubKey": "ASC"
-                  })
-                  .where("block.priority <= :fixedPriority", { fixedPriority: Constants.BlockPriorityUnconfirmed })
-                  .andWhere((specificPubKey === undefined) ? "1 = 1" : "ass.pubKey = :specificPubKey", { specificPubKey })
-                  .offset(currentOffset)
-                  .limit(pageSize)
-              , "assByPriority")
-              .innerJoin(AccountStateSnapshot, "ass", "assByPriority.assByPriorityPubKey = ass.pubKey")
-              .innerJoin("ass.mostRecentAssociatedBlock", "block", "block.priority = maxBlockPriority")
-              .groupBy("assByPriorityPubKey")
-              .where((maxBlockHeight === undefined) ? "1 = 1" : "block.height <= :maxBlockHeight", { maxBlockHeight })
-          , "currState", "ass.hash = currState.hash")
+          .innerJoin(Block.getAssPubKeysAndHashesSqlSubquerFunction({
+            maxBlockHeight,
+            maxPriority: shouldIncludeTemporary ? Constants.BlockPriorityTemporary : Constants.BlockPriorityCommon,
+            specificPubKey,
+            offset: currentOffset,
+            limit: pageSize,
+          }), "currState", "ass.hash = currState.hash")
           .leftJoinAndSelect("ass.roles", "role")
-          .orderBy({
-            "ass.pubKey": "ASC"
-          })
-      } else {
-        currentQb = createQueryBuilder()
-          .select("ass")
-          .from(AccountStateSnapshot, "ass")
-          .innerJoin(subQb =>
-            subQb
-              .select("ass.hash", "hash")
-              .addSelect("MAX(block.height)", "maxBlockHeight")
-              .from(AccountStateSnapshot, "ass")
-              .leftJoin("ass.mostRecentAssociatedBlock", "block")
-              .where((maxBlockHeight === undefined) ? "1 = 1" : "block.height <= :maxBlockHeight", { maxBlockHeight })
-              .andWhere("block.priority = :fixedPriority", { fixedPriority: Constants.BlockPriorityCommon })
-              .andWhere((specificPubKey === undefined) ? "1 = 1" : "ass.pubKey = :specificPubKey", { specificPubKey })
-              .groupBy("ass.pubKey")
-              .offset(currentOffset)
-              .limit(pageSize)
-          , "currState", "ass.hash = currState.hash")
-          .leftJoinAndSelect("ass.roles", "role")
-          .orderBy({
-            "ass.pubKey": "ASC"
-          })
-      }
+          .orderBy("ass.pubKey", "ASC")
       
       debug.debug(`executing sql in Block.getState: ${currentQb.getQueryAndParameters()}`)
       const currentAsses = await currentQb.getMany()
@@ -368,28 +470,29 @@ export class Block extends BaseEntity {
 
   public static async getFirstSpecificState(options: {
     maxBlockHeight?: undefined | number,
-    shouldIncludeUnconfirmed?: boolean,
+    shouldIncludeTemporary?: boolean,
     specificPubKey?: undefined | string,
     shouldCreateIfNotFound?: boolean,
-    createTargetBlock?: Block,
+    targetBlockToCreateIn?: Block,
   } = {}): Promise<AccountStateSnapshot> {
     const {
       specificPubKey,
       shouldCreateIfNotFound = false,
-      createTargetBlock,
+      targetBlockToCreateIn,
     } = options
 
     for await (const ass of this.getState(options)) {
       return ass
     }
 
+    // Not found
     if (shouldCreateIfNotFound) {
       if (!specificPubKey) {
         throw new GetStateInvalidArgumentError(`specificPubKey not specified when creating account state (because not found)`)
       }
 
-      if (!createTargetBlock) {
-        throw new GetStateInvalidArgumentError(`createTargetBlock not specified when creating account state (because not found)`)
+      if (!targetBlockToCreateIn) {
+        throw new GetStateInvalidArgumentError(`targetBlockToCreateIn not specified when creating account state (because not found)`)
       }
       
       const newAss: AccountStateSnapshot = await AccountStateSnapshot.normalize({
@@ -407,7 +510,7 @@ export class Block extends BaseEntity {
         shouldAssignExistingHash: false
       })
 
-      createTargetBlock.mostRecentAssociatedAccountStateSnapshots.push(newAss)
+      targetBlockToCreateIn.mostRecentAssociatedAccountStateSnapshots.push(newAss)
       return newAss
     } else {
       throw new EntityNotFoundError(`not found specific account state`, `${options}`)
@@ -415,7 +518,7 @@ export class Block extends BaseEntity {
   }
 
   public async * getState(options: {
-    shouldIncludeUnconfirmed?: boolean,
+    shouldIncludeTemporary?: boolean,
     specificPubKey?: undefined | string,
   } = {}): AsyncGenerator<AccountStateSnapshot> {
     const optionsWithHeight = Object.assign(options, {
@@ -425,10 +528,10 @@ export class Block extends BaseEntity {
   }
 
   public async getFirstSpecificState(options: {
-    shouldIncludeUnconfirmed?: boolean,
+    shouldIncludeTemporary?: boolean,
     specificPubKey?: undefined | string,
     shouldCreateIfNotFound?: boolean,
-    createTargetBlock?: Block,
+    targetBlockToCreateIn?: Block,
   } = {}): Promise<AccountStateSnapshot> {
     const optionsWithHeight = Object.assign(options, {
       maxBlockHeight: this.height,
@@ -436,32 +539,100 @@ export class Block extends BaseEntity {
     return await Block.getFirstSpecificState(optionsWithHeight)
   }
 
-  public static async calcStateHash({
-    state,
-    encoding = "hex",
+  public async apply({
+    baseBlock,
+    targetBlock = this,
   }: {
-    state: AccountStateSnapshot[],
-    encoding?: "hex" | "buffer",
-  }): Promise<any> {
+    baseBlock: Block,
+    targetBlock: Block,
+  }): Promise<void> {
+    for (const transaction of this.transactions) {
+      await transaction.apply({
+        baseBlock,
+        targetBlock,
+      })
+    }
+
+    let isGeneratorAssInTargetBlock = true
+    let generator = targetBlock.mostRecentAssociatedAccountStateSnapshots.find(ass =>
+      ass.pubKey === this.generator)
+
+    if (generator === undefined) {
+      generator = await baseBlock.getFirstSpecificState({
+        shouldIncludeTemporary: false,
+        shouldCreateIfNotFound: false,
+        specificPubKey: this.generator,
+      })
+      isGeneratorAssInTargetBlock = false
+    }
+
+    generator.balance += this.transactions.map(transaction => transaction.fee).reduce((prev, curr) => prev + curr)
+    generator.balance += this.mineReward
+
+    if (!isGeneratorAssInTargetBlock) {
+      targetBlock.mostRecentAssociatedAccountStateSnapshots.push(generator)
+    }
+  }
+
+  public static async calcStateHash(options?: {
+    assesOrAssHashes?: AsyncGenerator<AccountStateSnapshot | string, any, unknown>,
+    maxBlockHeight?: number,
+    shouldIncludeTemporary?: boolean,
+    encoding?: "hex",
+  }): Promise<string>
+  public static async calcStateHash(options?: {
+    assesOrAssHashes?: AsyncGenerator<AccountStateSnapshot | string, any, unknown>,
+    maxBlockHeight?: number,
+    shouldIncludeTemporary?: boolean,
+    encoding?: "buffer",
+  }): Promise<Buffer>
+  public static async calcStateHash({
+    assesOrAssHashes = undefined as AsyncGenerator<AccountStateSnapshot | string, any, unknown>,
+    maxBlockHeight = undefined as number,
+    shouldIncludeTemporary = false,
+    encoding = "hex",
+  } = {}): Promise<any> {
+
     const stateHasher = multihashing.createHash("sha2-256")
-    for await (const ass of state) {
-      stateHasher.update(await ass.calcHash({
-        encoding: "buffer",
-        shouldAssignHash: false,
-        shouldAssignExistingHash: false,
-        shouldUseExistingHash: false
-      }))
+    if (assesOrAssHashes === undefined) {
+      assesOrAssHashes = Block.getState({
+        maxBlockHeight,
+        shouldIncludeTemporary,
+      })
+    }
+
+    for await (const assOrAssHash of assesOrAssHashes) {
+      if (typeof assOrAssHash === "string") {
+        stateHasher.update(Buffer.from(assOrAssHash, "hex"))
+      } else {
+        stateHasher.update(await assOrAssHash.calcHash({
+          encoding: "buffer",
+          shouldAssignHash: false,
+          shouldAssignExistingHash: false,
+          shouldUseExistingHash: false
+        }))
+      }
     }
 
     const resultBuffer: Buffer = multihash.encode(stateHasher.digest(), "sha2-256")
     return encoding === "buffer" ? resultBuffer : resultBuffer.toString(encoding)
   }
 
+  public async calcStateHash(options?: {
+    encoding?: "hex",
+    shouldAssignHash?: boolean,
+    shouldUseExistingHash?: boolean,
+  }): Promise<string>
+  public async calcStateHash(options?: {
+    encoding: "buffer",
+    shouldAssignHash?: boolean,
+    shouldUseExistingHash?: boolean,
+  }): Promise<Buffer>
   public async calcStateHash({
-    encoding = "hex",
+    encoding = "hex" as "hex" | "buffer",
     shouldAssignHash = false,
     shouldUseExistingHash = true,
-  } = {}): Promise<any> {
+  } = {}): Promise<Buffer | string> {
     const stateHasher = multihashing.createHash("sha2-256")
     if (shouldUseExistingHash) {
       for await (const assHash of this.getAssHashes()) {
@@ -488,6 +659,22 @@ export class Block extends BaseEntity {
     }
   }
 
+  public async calcHash(options?: {
+    encoding?: "hex",
+    shouldAssignHash?: boolean,
+    shouldUseExistingChildHash?: boolean,
+    shouldUseExistingStateHash?: boolean,
+    shouldAssignExistingHash?: boolean,
+    shouldUseExistingAssHash?: boolean,
+  }): Promise<string>
+  public async calcHash(options?: {
+    encoding?: "buffer",
+    shouldAssignHash?: boolean,
+    shouldUseExistingChildHash?: boolean,
+    shouldUseExistingStateHash?: boolean,
+    shouldAssignExistingHash?: boolean,
+    shouldUseExistingAssHash?: boolean,
+  }): Promise<Buffer>
   public async calcHash({
     encoding = "hex",
     shouldAssignHash = false,
@@ -500,16 +687,16 @@ export class Block extends BaseEntity {
 
     const hasher = multihashing.createHash("sha2-256")
 
-    const tmpBuffer = Buffer.alloc(8)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.version))
-    hasher.update(tmpBuffer)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.timestamp.getTime()))
-    hasher.update(tmpBuffer)
-    tmpBuffer.writeBigInt64BE(BigInt(obj.height))
-    hasher.update(tmpBuffer)
+    const tempBuffer = Buffer.alloc(8)
+    tempBuffer.writeBigInt64BE(BigInt(obj.version))
+    hasher.update(tempBuffer)
+    tempBuffer.writeBigInt64BE(BigInt(obj.timestamp.getTime()))
+    hasher.update(tempBuffer)
+    tempBuffer.writeBigInt64BE(BigInt(obj.height))
+    hasher.update(tempBuffer)
     hasher.update(Buffer.from(obj.prevHash, "hex"))
-    tmpBuffer.writeBigInt64BE(BigInt(obj.mineReward))
-    hasher.update(tmpBuffer)
+    tempBuffer.writeBigInt64BE(BigInt(obj.mineReward))
+    hasher.update(tempBuffer)
     hasher.update(Buffer.from(obj.generator))
     
     const transactionsHasher = multihashing.createHash("sha2-256")
@@ -526,8 +713,6 @@ export class Block extends BaseEntity {
         transactionsHasher.update(await transaction.calcHash({
           encoding: "buffer",
           shouldAssignHash: shouldAssignExistingHash,
-          shouldAssignExistingHash: shouldAssignExistingHash,
-          shouldUseExistingHash: shouldUseExistingChildHash,
         }))
       }
     }

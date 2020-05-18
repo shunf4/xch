@@ -6,6 +6,7 @@ import { Profile } from "./profile"
 import genesisBlockData from "../testGenesisBlock.json"
 import { AccountStateSnapshot } from "./entity/AccountStateSnapshot"
 import { getConnection } from "typeorm"
+import Constants from "./constants"
 
 export class Blockchain {
   p2pLayer: P2pLayer
@@ -16,99 +17,98 @@ export class Blockchain {
   private constructor() {
   }
 
-  // public async load(): Promise<void> {
-  //   // 0. load genesisBlock
-  //   this.genesisBlock = await Block.normalize(genesisBlockData)
+  public async load(): Promise<void> {
+    // 0. load genesisBlock
+    this.genesisBlock = await Block.normalize(genesisBlockData)
+    const emptyBlock = await Block.normalize({
+      height: -1,
+    }, {
+      shouldValidate: false
+    })
 
-  //   // 1. verify currently saved blocks
-  //   if (this.profile.config.verifySavedBlocksOnStart === "full") {
-  //     // 1.a1. verify the first block is equal to genesis block
-  //     const firstBlock = await Block.findOneOrFail({
-  //       height: 0
-  //     })
+    // 1. verify currently saved blocks
+    if (this.profile.config.verifySavedBlocksOnStart === "full") {
+      // 1.a1. verify the first block is equal to genesis block
+      const firstBlock = await Block.findOneOrFail({
+        height: 0
+      })
 
-  //     const firstBlockHash = await firstBlock.calcHash({
-  //       shouldUseExistingChildHash: false,
-  //       shouldUseExistingStateHash: false,
-  //       shouldUseExistingAssHash: false,
-  //     })
-  //     if (firstBlock.hash !== firstBlockHash) {
-  //       throw new Error()
-  //     }
-  //     const genesisBlockHash = await this.genesisBlock.calcHash({
-  //       shouldUseExistingChildHash: false,
-  //       shouldUseExistingStateHash: false,
-  //       shouldUseExistingAssHash: false
-  //     })
-  //     if (firstBlockHash !== genesisBlockHash) {
-  //       throw new Error()
-  //     }
+      const firstBlockHash = await firstBlock.calcHash({
+        shouldUseExistingChildHash: false,
+        shouldUseExistingStateHash: false,
+        shouldUseExistingAssHash: false,
+      })
+      if (firstBlock.hash !== firstBlockHash) {
+        throw new Error()
+      }
+      const genesisBlockHash = await this.genesisBlock.calcHash({
+        shouldUseExistingChildHash: false,
+        shouldUseExistingStateHash: false,
+        shouldUseExistingAssHash: false
+      })
+      if (firstBlockHash !== genesisBlockHash) {
+        throw new Error()
+      }
 
-  //     // 1.a2. generate initial state and verify genesis block
-  //     await getConnection()
-  //       .createQueryBuilder()
-  //       .delete()
-  //       .from(AccountStateSnapshot)
+      // 1.a2. generate initial state and verify genesis block
+      await getConnection()
+        .createQueryBuilder()
+        .delete()
+        .from(AccountStateSnapshot)
 
-  //     await firstBlock.applyOn()
+      const temporaryBlock = await Block.findOneWithAllRelationsOrFail({
+        priority: Constants.BlockPriorityTemporary,
+        height: -1
+      })
+      await temporaryBlock.clearAndSave()
+      await firstBlock.apply({
+        baseBlock: emptyBlock,
+        targetBlock: temporaryBlock,
+      })
 
-  //     // 1.a2. verify blocks
-  //     let lastBlock = firstBlock
-  //     for await (const block of Block.getBlocks({
-  //       minHeight: 1,
-  //       withRelations: true,
-  //     })) {
-  //       // 1.a2.1. verify this block's prevHash
-  //       if (block.prevHash !== lastBlock.hash) {
-  //         throw new Error()
-  //       }
+      // 1.a2. verify blocks
+      
+      let lastBlock = firstBlock
+      for await (const block of Block.getBlocks({
+        minHeight: 1,
+        withRelations: true,
+      })) {
+        // 1.a2.1. verify this block except its state
+        await block.verifyAllButState({
+          genesisBlock: this.genesisBlock,
+          expectedHeight: lastBlock.height + 1,
+          expectedPrevHash: lastBlock.hash,
+        })
 
-  //       // 1.a2.2. verify signature
-  //       await block.verifySignature()
+        // 1.a2.2 apply transactions
+        for (const transaction of block.transactions) {
+          await transaction.apply({
+            baseBlock: block,
+            targetBlock: temporaryBlock
+          })
+        }
 
-  //       // 1.a3.3 verify slot
-  //       const { round, slot } = block.getSlot()
-  //       await Delegate.verifyDelegates({
-  //         round,
-  //         slot,
-  //         state,
-  //       })
+        await block.finalize()
 
-  //       // TODO: what marks the end of a round?
+        const stateHashBasedOnAssesInBlock = await block.calcStateHash({
+          shouldAssignHash: false,
+          shouldUseExistingHash: false,
+        })
+        const stateHashBasedOnJustComputedAsses = await Block.calcStateHash({
+          assesOrAssHashes: Block.getState({
+            shouldIncludeTemporary: true,
+            maxBlockHeight: block.height - 1,
+          }),
+        })
 
-  //       // 1.a4.4 verify transactions
-  //       for (const transaction of block.transactions) {
-  //         await transaction.verify()
-  //         state = await transaction.applyOn(state)
-  //       }
+        if (stateHashBasedOnJustComputedAsses !== stateHashBasedOnAssesInBlock || stateHashBasedOnJustComputedAsses !== block.stateHash) {
+          throw new BlockVerificationStateHashError(`verify block(${block.priority}, ${block.height}): invalid state hash: in field - ${block.stateHash}, from ass field - ${stateHashBasedOnAssesInBlock}, just computed(expected) - ${stateHashBasedOnJustComputedAsses}`)
+        }
 
-  //       // TODO: how to handle temporal state?
-  //       state = await block.finalizeOn(state) // will include the change of delegates if necessary ?
-
-  //       // TODO: type of return value of calcStateHash
-  //       const stateHashFromAssesInBlock = await block.calcStateHash({
-  //         shouldAssignHash: false,
-  //         shouldUseExistingHash: false,
-  //       })
-  //       const stateHashReal = await Block.calcStateHash({ state })
-  //       if (stateHashReal !== stateHashFromAssesInBlock || stateHashReal !== block.stateHash) {
-  //         throw new Error()
-  //       }
-
-  //       // TODO: sign first or hash first?
-  //       // 1.a4.5 verify hash
-  //       if (block.hash !== await block.calcHash({
-  //         shouldUseExistingChildHash: true,
-  //         shouldUseExistingStateHash: false,
-  //         shouldUseExistingAssHash: false,
-  //       })) {
-  //         throw new Error()
-  //       }
-
-  //       lastBlock = block
-  //     }
-  //   }
-  // }
+        lastBlock = block
+      }
+    }
+  }
 
   public static async create(options: {
     p2pLayer: P2pLayer,
