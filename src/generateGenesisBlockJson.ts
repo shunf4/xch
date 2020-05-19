@@ -10,7 +10,7 @@ import yargs from "yargs"
 import "reflect-metadata"
 import { createConnection, getConnectionOptions, getConnection } from "typeorm"
 
-import { doNotWait } from "./xchUtil"
+import { doNotWait, printException } from "./xchUtil"
 import { Profile } from "./profile"
 
 
@@ -126,11 +126,9 @@ async function main(): Promise<void> {
     }
 
   } catch (err) {
-    if (err.stack) {
-      debug.error(`Exception occurred(${err.constructor.name}). Stack: ${err.stack}`)
-    } else {
-      debug.error(`${err.constructor.name}: ${err.message}`)
-    }
+    printException(debug, err, {
+      prefix: "During running generateGenesisBlock.main: ",
+    })
   }
 }
 

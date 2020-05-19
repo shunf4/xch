@@ -4,7 +4,7 @@ import pDefer from "p-defer"
 import pushable, { Pushable } from "it-pushable"
 import Debug from "debug-level"
 import { runInNewContext } from "vm";
-import { createTimingOutSource } from "./xchUtil";
+import { createTimingOutSource, printException } from "./xchUtil";
 import Constants from "./constants";
 
 const debug = Debug("xch:telephone")
@@ -298,11 +298,9 @@ export class Telephone {
           debug.warn(`${this.name}: not answering when handling tag "${questionTag}"`)
         }
       } catch (err) {
-        if (err.stack) {
-          debug.error(`Exception occurred when answering telephone ${this.name} (${err.constructor.name}). Stack: ${err.stack}`)
-        } else {
-          debug.error(`${err.constructor.name}: ${err.message}`)
-        }
+        printException(debug, err, {
+          prefix: `During answering telephone ${this.name}: `,
+        })
       }
     })
   }

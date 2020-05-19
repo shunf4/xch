@@ -4,8 +4,15 @@ import { AccountStateSnapshot } from "./entity/AccountStateSnapshot"
 import { createQueryBuilder } from "typeorm"
 import { Block } from "./entity/Block"
 import Constants from "./constants"
+import { DposInsufficientWitnessError, DposInvalidWitnessError, EntityValueError, DposDataInvalidError } from "./errors"
+import { assertType, assertCondition, assertInstanceOf } from "./xchUtil"
+import { Role } from "./entity/Role"
 
 const debug = Debug("xch:dpos")
+
+export type WitnessExtendedAss = AccountStateSnapshot & {
+  witnessRole: Role,
+}
 
 export class Dpos {
 
@@ -28,12 +35,15 @@ export class Dpos {
     }
   }
 
+  // if overridingBlock specified, returned asses is not sorted; else they are ordered ASC by pubKey.
   public static async * getWitnesses({
     maxBlockHeight = undefined as undefined | number,
     shouldIncludeTemporary = false,
+    overridingBlock = undefined as Block,
   } = {}): AsyncGenerator<AccountStateSnapshot, void, undefined> {
     const pageSize = 30
     let currentOffset = 0
+    const assesInOverridingBlock = overridingBlock ? [...overridingBlock.mostRecentAssociatedAccountStateSnapshots] : []
     while (true) {
       const qb = createQueryBuilder()
         .select("ass")
@@ -60,17 +70,32 @@ export class Dpos {
       debug.debug(`done executing sql in Block.getWitnesses, currentAsses.length === ${currentWitnesses.length}`)
 
       if (currentWitnesses.length === 0) {
-        return
+        break
       }
 
       for (const witness of currentWitnesses) {
-        yield witness
+        const assIndexInOverridingBlock = assesInOverridingBlock.findIndex(assInOverridingBlock => assInOverridingBlock.pubKey === witness.pubKey)
+        if (assIndexInOverridingBlock !== -1) {
+          const overriddenWitness = assesInOverridingBlock[assIndexInOverridingBlock]
+          if (overriddenWitness.roles.find(role => role.name === "witness")) {
+            yield overriddenWitness
+          }
+          assesInOverridingBlock[assIndexInOverridingBlock] = null
+        } else {
+          yield witness
+        }
       }
       currentOffset += pageSize
     }
+
+    for (const ass of assesInOverridingBlock) {
+      if (ass !== null && ass.roles.find(role => role.name === "witness")) {
+        yield ass
+      }
+    }
   }
 
-  public static async getWorkingWitnesses(options: {
+  public static async getFirstWitnesses(options: {
     maxBlockHeight?: number,
     shouldIncludeTemporary?: boolean,
   } = {}): Promise<AccountStateSnapshot[]> {
@@ -80,12 +105,59 @@ export class Dpos {
     for (let i = 0; i < Constants.DposWitnessNumber; i++) {
       const itResult = await generator.next()
       if (itResult.done) {
-        throw new DposInsufficientWitnessError(`fetching working witnesses ${i}: got done, insufficient witnesses`)
+        throw new DposInsufficientWitnessError(`fetching first witnesses ${i}: got done, insufficient witnesses`)
       }
       witnesses.push(itResult.value as AccountStateSnapshot)
     }
 
     return witnesses
+  }
+
+  public static async getWorkingWitnessPubKeys(options: {
+    maxBlockHeight?: number,
+    shouldIncludeTemporary?: boolean,
+  } = {}): Promise<string[]> {
+    const {
+      maxBlockHeight = undefined as number,
+      shouldIncludeTemporary = false,
+    } = options
+
+    const dposData = (await Block.getFirstSpecificState({
+      maxBlockHeight,
+      shouldIncludeTemporary,
+      shouldCreateIfNotFound: false,
+      specificPubKey: "DPOS",
+    })).state
+
+
+    assertInstanceOf(dposData.workingWitnesses, Array, DposDataInvalidError, "dposAss.state.workingWitnesses")
+
+    if (dposData.workingWitnesses.length !== Constants.DposWitnessNumber) {
+      throw new DposInsufficientWitnessError(`fetching working witnesses: invalid number: ${dposData.workingWitnesses.length}(should be ${Constants.DposWitnessNumber})`)
+    }
+
+    for (const pubKey of dposData.workingWitnesses) {
+      assertType(pubKey, "string", DposDataInvalidError, "dposAss.state.workingWitnesses[]")
+    }
+
+    return dposData.workingWitnesses
+
+    // const workingWitnesses = []
+    // for (const witnessPubKey of dposData.workingWitnesses) {
+    //   assertType(witnessPubKey, "string", DposDataInvalidError, "dposAss.state.workingWitnesses[]")
+    //   workingWitnesses.push(await Block.getFirstSpecificState({
+    //     maxBlockHeight,
+    //     shouldIncludeTemporary,
+    //     shouldCreateIfNotFound: false,
+    //     specificPubKey: witnessPubKey,
+    //   }))
+    // }
+
+    // if (workingWitnesses.length !== Constants.DposWitnessNumber) {
+    //   throw new DposInsufficientWitnessError(`fetching working witnesses: invalid number: ${workingWitnesses.length}(should be ${Constants.DposWitnessNumber})`)
+    // }
+
+    // return workingWitnesses
   }
 
   public static async verifyWitness({
@@ -98,13 +170,13 @@ export class Dpos {
     }
 
     const blockEpochAndSlot = Dpos.getEpochAndSlot(block.timestamp)
-    const workingWitnesses = await Dpos.getWorkingWitnesses({
+    const workingWitnessPubKeys = await Dpos.getWorkingWitnessPubKeys({
       maxBlockHeight: block.height - 1,
       shouldIncludeTemporary: false,
     })
 
-    if (workingWitnesses[blockEpochAndSlot.slot].pubKey !== block.generator) {
-      throw new DposInvalidWitnessError(`generator of the block is invalid to DPos consensus (is ${block.generator}, expecting ${workingWitnesses[blockEpochAndSlot.slot]})`)
+    if (workingWitnessPubKeys[blockEpochAndSlot.slot] !== block.generator) {
+      throw new DposInvalidWitnessError(`generator of the block is invalid to DPos consensus (is ${block.generator}, expecting ${workingWitnessPubKeys[blockEpochAndSlot.slot]})`)
     }
   }
 

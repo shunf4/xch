@@ -182,6 +182,7 @@ export class Transaction {
   public async apply(options: {
     baseBlock: Block,
     targetBlock: Block,
+    isGenesis: boolean,
   }): Promise<void> {
     await Transaction.handlers[this.type].apply({
       ...options,

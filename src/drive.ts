@@ -15,7 +15,7 @@ import { Profile } from "./profile"
 import { P2pLayer } from "./p2pLayer"
 import { Blockchain } from "./blockchain"
 import constants from "./constants"
-import { sleep, doNotWait } from "./xchUtil"
+import { sleep, doNotWait, printException } from "./xchUtil"
 
 
 
@@ -160,11 +160,9 @@ async function main(): Promise<void> {
     }
 
   } catch (err) {
-    if (err.stack) {
-      debug.error(`Exception occurred(${err.constructor.name}). Stack: ${err.stack}`)
-    } else {
-      debug.error(`${err.constructor.name}: ${err.message}`)
-    }
+    printException(debug, err, {
+      prefix: "During main: ",
+    })
   }
 }
 

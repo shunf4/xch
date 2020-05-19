@@ -44,6 +44,7 @@
     "it-pair": "^1.0.0",
     "it-pipe": "^1.1.0",
     "it-pushable": "^1.4.0",
+    "knuth-shuffle-seeded": "^1.0.6",
     "libp2p": "^0.27.7",
     "libp2p-bootstrap": "^0.10.4",
     "libp2p-crypto": "^0.17.6",

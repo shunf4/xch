@@ -74,7 +74,7 @@ export class AccountStateSnapshot {
     shouldValidate = true,
     shouldCalcAndAssignHash = false,
     calcHashArgs = {} as {
-      encoding?: string,
+      encoding?: "hex" | "buffer",
       shouldAssignHash?: boolean,
       shouldUseExistingHash?: boolean,
       shouldAssignExistingHash?: boolean,
@@ -86,9 +86,10 @@ export class AccountStateSnapshot {
         [false, "pubKey", assertType, "string"],
         [false, "pubKey", assertCondition, stringIsNotEmpty],
         [false, "nonce", assertType, "number"],
+        [false, "nonce", assertCondition, Number.isInteger],
         [false, "nonce", assertCondition, greaterThanOrEqualTo(0)],
         [false, "balance", assertType, "number"],
-        [false, "balance", assertCondition, greaterThanOrEqualTo(0)],
+        [false, "balance", assertCondition, Number.isInteger],
         [false, "state", assertType, "object"],
         [false, "state", assertCondition, isJsonSerializable],
         [false, "mostRecentAssociatedBlocks", assertTypeOrInstanceOf, ["undefined", Array]],
@@ -132,11 +133,29 @@ export class AccountStateSnapshot {
     return newObj
   }
 
+  public async calcHash(options?: {
+    encoding?: "hex",
+    shouldAssignHash?: boolean,
+    shouldUseExistingHash?: boolean,
+    shouldAssignExistingHash?: boolean,
+  }): Promise<string>
+  public async calcHash(options?: {
+    encoding?: "buffer",
+    shouldAssignHash?: boolean,
+    shouldUseExistingHash?: boolean,
+    shouldAssignExistingHash?: boolean,
+  }): Promise<Buffer>
+  public async calcHash(options?: {
+    encoding?: "hex" | "buffer",
+    shouldAssignHash?: boolean,
+    shouldUseExistingHash?: boolean,
+    shouldAssignExistingHash?: boolean,
+  }): Promise<string | Buffer>
   public async calcHash({
-    encoding = "hex",
+    encoding = "hex" as "hex" | "buffer",
     shouldAssignHash = false,
     shouldUseExistingHash = true,
-    shouldAssignExistingHash = false
+    shouldAssignExistingHash = false,
   }): Promise<any> {
     let obj: AccountStateSnapshot = this
 

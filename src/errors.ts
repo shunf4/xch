@@ -28,6 +28,8 @@ export class DposError extends Error {}
 
 export class BlockVerificationError extends VerificationError {}
 
+export class BlockVerificationGenesisError extends VerificationError {}
+
 export class BlockVerificationHashError extends BlockVerificationError {}
 
 export class BlockVerificationPrevHashError extends BlockVerificationError {}
@@ -60,3 +62,4 @@ export class DposInsufficientWitnessError extends DposError {}
 
 export class DposInvalidWitnessError extends DposError {}
 
+export class DposDataInvalidError extends Error {}

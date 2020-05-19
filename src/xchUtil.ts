@@ -378,3 +378,23 @@ export function coloredFullObjectOutput(obj: any): string {
 export function printObject(...objs: any[]): void {
   console.log(...objs.map(obj => coloredFullObjectOutput(obj)))
 }
+
+export function printException(debug: any, err: Error, {
+  prefix = "",
+  printStack = "full",
+}: {
+  prefix?: string,
+  printStack?: "full" | "oneLine" | "off",
+} = {}): void {
+  if (err.stack) {
+    let stackString = ""
+    if (printStack === "full") {
+      stackString = `Stack: ${err.stack}`
+    } else if (printStack === "oneLine") {
+      stackString = `Stack: ${[...err.stack.split("\n"), "(no information)"][0]}`
+    }
+    debug.error(`${prefix}Exception occurred(${err.constructor.name}). ${stackString}`)
+  } else {
+    debug.error(`${prefix}Exception occurred(${err.constructor.name}): ${err.message}`)
+  }
+}

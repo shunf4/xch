@@ -1,17 +1,19 @@
 import { Transaction } from "../entity/Transaction";
 import { Block } from "../entity/Block";
-import { TransactionInsufficientAmountError, TransactionNonceError } from "../errors";
+import { TransactionInsufficientAmountError, TransactionNonceError, TransactionVerificationHashError, TransactionVerificationSignatureError, TransactionVerificationFeeError, TransactionVerificationAmountError, TransactionVerificationTimestampError, TransactionVerificationSeqInBlockError, EntityValueError } from "../errors";
 import { AccountStateSnapshot } from "../entity/AccountStateSnapshot";
 import PeerId from "peer-id";
+import { assertInstanceOf, assertType, assertCondition } from "../xchUtil";
 
 export interface ITransactionApplyOptions {
   transaction: Transaction,
   baseBlock: Block,
   targetBlock: Block,
+  isGenesis: boolean,
 }
 
 export interface ITransactionApplyContext {
-  newNextBlock: Block,
+  newTargetBlock: Block,
   newSender: AccountStateSnapshot,
 }
 
@@ -40,26 +42,29 @@ export class BaseTransactionHandler {
     transaction,
     baseBlock,
     targetBlock,
+    isGenesis,
   }: ITransactionApplyOptions): Promise<void> {
     // Load
-    const newNextBlock = await Block.normalize(targetBlock)
+    const newTargetBlock = await Block.normalize(targetBlock)
 
     const sender = await baseBlock.getFirstSpecificState({
       shouldCreateIfNotFound: true,
-      shouldIncludeTemporary: true,
+      shouldIncludeTemporary: false,
       specificPubKey: transaction.sender,
-      targetBlockToCreateIn: newNextBlock,
+      targetBlockToCreateIn: newTargetBlock,
+      overridingBlock: newTargetBlock,
     })
 
     const newSender = await AccountStateSnapshot.normalize(sender)
+
     const amountToSubtract = transaction.fee + transaction.amount
 
     // Check whether this transaction can be executed
-    if (transaction.nonce !== sender.nonce) {
+    if (transaction.nonce !== sender.nonce && !isGenesis) {
       throw new TransactionNonceError(`sender.nonce: ${sender.nonce} !== transaction.nonce: ${transaction.nonce}`)
     }
 
-    if (sender.balance < amountToSubtract) {
+    if (sender.balance < amountToSubtract && !isGenesis) {
       throw new TransactionInsufficientAmountError(`sender.balance: ${sender.balance} < fee: ${transaction.fee} + amount: ${transaction.amount}`)
     }
 
@@ -70,13 +75,13 @@ export class BaseTransactionHandler {
 
     Object.assign(context, {
       newSender,
-      newNextBlock,
+      newTargetBlock,
     })
   }
 
   protected async afterApply({
     newSender,
-    newNextBlock,
+    newTargetBlock,
   }: Partial<ITransactionApplyContext>,
   {
     transaction,
@@ -88,8 +93,10 @@ export class BaseTransactionHandler {
       shouldAssignHash: true,
       shouldUseExistingHash: true,
     })
+
+    newTargetBlock.updateMostRecentAssociatedAccountStateSnapshots([newSender])
     
-    Object.assign(targetBlock, newNextBlock)
+    Object.assign(targetBlock, newTargetBlock)
   }
 
   protected async doVerify({

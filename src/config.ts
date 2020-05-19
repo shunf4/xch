@@ -23,7 +23,7 @@ interface IXchLibp2pConfig {
 
   extraAccountPeerIds: PeerId[],
 
-  verifySavedBlocksOnStart: string,
+  blockValidationMode: string,
 }
 
 
@@ -69,7 +69,7 @@ const XchLibp2pConfigDefaultGenerator: DefaultGenerator<IXchLibp2pConfig> = {
   extraAccountPeerIds: async () => {
     return []
   },
-  verifySavedBlocksOnStart: async () => {
+  blockValidationMode: async () => {
     return "mostRecent"
   },
 }
@@ -148,15 +148,15 @@ const XchLibp2pConfigNormalizer: Normalizer<IXchLibp2pConfig> = {
 
     return result
   },
-  verifySavedBlocksOnStart: async (input: any) => {
-    assertType(input, "string", ConfigTypeError, "config.verifySavedBlocksOnStart")
+  blockValidationMode: async (input: any) => {
+    assertType(input, "string", ConfigTypeError, "config.blockValidationMode")
     if (input === "off"
       || input === "mostRecent"
       || input === "full"
     ) {
       return input
     } else {
-      throw new ConfigValueError(`invalid config.verifySavedBlocksOnStart value: ${input}`)
+      throw new ConfigValueError(`invalid config.blockValidationMode value: ${input}`)
     }
   }
 }
@@ -174,7 +174,7 @@ export class XchLibp2pConfig implements IXchLibp2pConfig {
   libp2pConfig: any
   listenAddrs: string[]
   extraAccountPeerIds: PeerId[]
-  verifySavedBlocksOnStart: string
+  blockValidationMode: string
 
   toString(): string {
     return YAML.stringify(this)

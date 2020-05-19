@@ -3,7 +3,7 @@ import Constants from "./constants"
 import __ from "underscore"
 import pDefer from "p-defer"
 
-import { assignOptions } from "./xchUtil"
+import { assignOptions, printException } from "./xchUtil"
 
 type DeferredPromise<T> = pDefer.DeferredPromise<T>
 const createDeferredPromise = pDefer
@@ -57,12 +57,10 @@ export class Task {
       this.finishedDeferred.resolve(result)
       return result
     } catch (err) {
-      if (err.stack) {
-        debug.error(`Exception occurred(${err.constructor.name}) when executing task ${this.description}. Stack: ${err.stack}`)
-      } else {
-        debug.error(`Exception occurred(${err.constructor.name}) when executing task ${this.description}: ${err.message}`)
-      }
-
+      printException(debug, err, {
+        prefix: `During executing task ${this.description}: `,
+      })
+      
       this.finishedDeferred.reject(err)
       if (shouldThrowException) {
         throw err

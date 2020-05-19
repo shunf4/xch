@@ -18,7 +18,7 @@ export class Transfer extends BaseTransactionHandler {
     } = options
 
     const {
-      newNextBlock,
+      newTargetBlock,
     }  = context
 
     // Load
@@ -26,7 +26,7 @@ export class Transfer extends BaseTransactionHandler {
       shouldCreateIfNotFound: true,
       shouldIncludeTemporary: true,
       specificPubKey: transaction.recipient,
-      targetBlockToCreateIn: newNextBlock,
+      targetBlockToCreateIn: newTargetBlock,
     })
 
     const newRecipient = await AccountStateSnapshot.normalize(recipient)
@@ -41,7 +41,8 @@ export class Transfer extends BaseTransactionHandler {
 
   protected async afterApply(context: ITransactionApplyTransferContext, options: ITransactionApplyOptions): Promise<void> {
     const {
-      newRecipient
+      newTargetBlock,
+      newRecipient,
     } = context
 
     await newRecipient.calcHash({
@@ -49,6 +50,8 @@ export class Transfer extends BaseTransactionHandler {
       shouldAssignHash: true,
       shouldUseExistingHash: true,
     })
+
+    newTargetBlock.updateMostRecentAssociatedAccountStateSnapshots([newRecipient])
 
     await super.afterApply(context, options)
   }

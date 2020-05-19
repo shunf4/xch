@@ -2,7 +2,7 @@ import { Entity, Column, PrimaryColumn, Index, OneToMany, ManyToMany, ManyToOne,
 import { EntityNotFoundError } from "typeorm/error/EntityNotFoundError"
 import { Transaction } from "./Transaction"
 import { assertType, assertCondition, assertInstanceOf, stringIsNotEmpty, greaterThanOrEqualTo, assertTypeOrInstanceOf, passesAssertion, printObject, isUndefinedOrNonEmptyString, TypelessPartial, equalTo, fullObjectOutput, isNotNullNorUndefined } from "../xchUtil"
-import { EntityValueError, GetStateInvalidArgumentError } from "../errors"
+import { EntityValueError, GetStateInvalidArgumentError, BlockVerificationHashError, BlockVerificationPrevHashError, BlockVerificationHeightError, BlockVerificationSignatureError, BlockVerificationVersionError, BlockVerificationSlotError, DposDataInvalidError } from "../errors"
 import { AccountStateSnapshot } from "./AccountStateSnapshot"
 import { validateEntity, findOneWithAllRelationsOrFail } from "./common"
 import multihashing from "multihashing"
@@ -10,8 +10,9 @@ import multihash from "multihashes"
 import Debug from "debug-level"
 import Constants from "../constants"
 import PeerId from "peer-id"
+import KnuthShuffle from "knuth-shuffle-seeded"
 import { Role } from "./Role"
-import { Dpos } from "../dpos"
+import { Dpos, WitnessExtendedAss } from "../dpos"
 
 const debug = Debug("xch:orm:Block")
 
@@ -82,15 +83,18 @@ export class Block extends BaseEntity {
     minHeight = undefined,
     maxHeight = undefined,
     withRelations = false,
+    orderByHeight = "ASC",
   }: {
     minHeight?: undefined | number,
     maxHeight?: undefined | number,
     withRelations?: boolean,
+    orderByHeight?: "ASC" | "DESC",
   } = {}): AsyncGenerator<Block> {
     // reload entity with relations
     let qb = getConnection()
       .createQueryBuilder(Block, "block")
       .where("1 = 1")
+      .orderBy("block.height", orderByHeight)
       
     if (minHeight !== undefined) {
       qb = qb.andWhere("block.height >= :minHeight", { minHeight })
@@ -135,7 +139,7 @@ export class Block extends BaseEntity {
     shouldValidate = true,
     shouldCalcAndAssignHash = false,
     calcHashArgs = {} as {
-      encoding?: string,
+      encoding?: "hex" | "buffer",
       shouldAssignHash?: boolean,
       shouldUseExistingChildHash?: boolean,
       shouldUseExistingStateHash?: boolean,
@@ -235,12 +239,47 @@ export class Block extends BaseEntity {
     return this
   }
 
+  public static async createTemporaryBlock(): Promise<Block> {
+    return await Block.normalize({
+      hash: "TEMPORARY_BLOCK",
+      generator: "",
+      height: -1,
+      mineReward: 0,
+      mostRecentAssociatedAccountStateSnapshots: [],
+      prevHash: "",
+      priority: Constants.BlockPriorityTemporary,
+      signature: "",
+      stateHash: "",
+      timestamp: new Date(0),
+      transactions: [],
+      version: 1,
+    })
+  }
+
+  public updateMostRecentAssociatedAccountStateSnapshots(
+    arr: AccountStateSnapshot[]
+  ): void {
+    const pubKeyToIndex: Record<string, number> = {}
+    for (const [i, ass] of this.mostRecentAssociatedAccountStateSnapshots.entries()) {
+      pubKeyToIndex[ass.pubKey] = i
+    }
+
+    for (const ass of arr) {
+      const index = pubKeyToIndex[ass.pubKey]
+      if (index !== undefined) {
+        this.mostRecentAssociatedAccountStateSnapshots[index] = ass
+      } else {
+        this.mostRecentAssociatedAccountStateSnapshots.push(ass)
+      }
+    }
+  }
+
   public async verifyAllButState({
-    genesisBlock,
+    genesisBlockHash,
     expectedPrevHash,
     expectedHeight,
   }: {
-    genesisBlock: Block,
+    genesisBlockHash: string,
     expectedPrevHash: string,
     expectedHeight: number,
   }): Promise<void> {
@@ -256,7 +295,7 @@ export class Block extends BaseEntity {
       throw new BlockVerificationHashError(`verify block(${this.priority}, ${this.height}): hash mismatch: ${this.hash} (expected ${expectedHash})`)
     }
 
-    if (expectedHash === genesisBlock.hash) {
+    if (expectedHash === genesisBlockHash) {
       return
     }
 
@@ -299,6 +338,126 @@ export class Block extends BaseEntity {
         blockTimestamp: this.timestamp,
         expectedSeqInBlock: i,
       })
+    }
+  }
+
+  
+  public async finalize({
+    baseBlock,
+    targetBlock = this,
+    genesisBlockTimestamp,
+  }: {
+    baseBlock: Block,
+    targetBlock: Block,
+    genesisBlockTimestamp: Date,
+  }): Promise<void> {
+    // 1. if it is the first block of a new epoch, re-elect
+    const baseBlockEpochAndSlot = Dpos.getEpochAndSlot(baseBlock.timestamp)
+    const currentBlockEpochAndSlot = Dpos.getEpochAndSlot(this.timestamp)
+
+    if (baseBlockEpochAndSlot.epoch < currentBlockEpochAndSlot.epoch) {
+      // re-elect
+
+      // 0. witnesses' participation in previous epoches
+      const workingWitnessPubKeys = await Dpos.getWorkingWitnessPubKeys({
+        maxBlockHeight: baseBlock.height,
+        shouldIncludeTemporary: false,
+      })
+
+      const pubKeyToForgeCount: Record<string, number> = {}
+
+      for (const pubKey of workingWitnessPubKeys) {
+        pubKeyToForgeCount[pubKey] = 0
+      }
+
+      const dposAss = await Block.getFirstSpecificState({
+        maxBlockHeight: baseBlock.height,
+        shouldIncludeTemporary: false,
+        shouldCreateIfNotFound: false,
+        specificPubKey: "DPOS",
+      })
+
+      const dposData = dposAss.state
+
+      assertType(dposData.firstBlockHeightOfEpoch, "number", DposDataInvalidError, "dposAss.state.firstBlockHeightOfEpoch")
+      assertCondition(dposData.firstBlockHeightOfEpoch, Number.isInteger, DposDataInvalidError, "dposAss.state.firstBlockHeightOfEpoch")
+
+      const currentEpochDuration = Math.min(Constants.DposEpochDurationMillisec, this.timestamp.getTime() - genesisBlockTimestamp.getTime())
+
+      for await (const block of Block.getBlocks({
+        minHeight: dposData.firstBlockHeightOfEpoch,
+        maxHeight: baseBlock.height,
+        orderByHeight: "ASC",
+        withRelations: false,
+      })) {
+        if (pubKeyToForgeCount[block.generator] === undefined) {
+          debug.warn(`some invalid user forged block in previous epoch: ${block.generator}. valid witnesses are: ${pubKeyToForgeCount}`)
+          continue
+        }
+        pubKeyToForgeCount[block.generator]++
+      }
+
+      for (const pubKey of workingWitnessPubKeys) {
+        if (pubKeyToForgeCount[pubKey] < currentEpochDuration / Constants.DposWitnessNumber / Constants.DposSlotDurationMillisec / 2) {
+          debug.info(`${pubKey} is not actively forging. currently not kicking`)
+        }
+      }
+
+      // 1. roll of witnesses
+
+      const witnesses: WitnessExtendedAss[] = []
+      const witnessesByPubKey: Record<string, WitnessExtendedAss> = {}
+
+      for await (const witness of Dpos.getWitnesses({
+        maxBlockHeight: baseBlock.height,
+        overridingBlock: targetBlock,
+        shouldIncludeTemporary: false,
+      })) {
+        const witnessExtended = witness as WitnessExtendedAss
+        witnessExtended.witnessRole = witness.roles.find(role => role.name === "witness")
+        witnessExtended.witnessRole.score = 0
+        witnessesByPubKey[witness.pubKey] = witnessExtended
+        witnesses.push(witnessExtended)
+      }
+
+      for await (const ass of Block.getState({
+        maxBlockHeight: baseBlock.height,
+        shouldIncludeTemporary: false,
+        overridingBlock: targetBlock,
+      })) {
+        if (ass.state.votes !== undefined && Array.isArray(ass.state.votes)) {
+          for (const vote of ass.state.votes) {
+            if (typeof vote.pubKey === "string" && typeof vote.roleName === "string") {
+              const witness = witnessesByPubKey[vote.pubKey]
+              if (witness) {
+                witness.witnessRole.score += ass.balance
+              }
+            }
+          }
+        }
+      }
+
+      witnesses.sort((assa, assb) => assa.witnessRole.score - assb.witnessRole.score)
+      for (const witness of witnesses) {
+        await witness.calcHash({
+          shouldAssignExistingHash: true,
+          shouldAssignHash: true,
+          shouldUseExistingHash: false,
+        })
+      }
+
+      KnuthShuffle(witnesses, baseBlock.hash)
+
+      // 2. update dpos
+      dposAss.state.firstBlockHeightOfEpoch = this.height
+      dposAss.state.workingWitnesses = witnesses
+      await dposAss.calcHash({
+        shouldAssignExistingHash: true,
+        shouldAssignHash: true,
+        shouldUseExistingHash: false,
+      })
+      
+      targetBlock.updateMostRecentAssociatedAccountStateSnapshots([...witnesses, dposAss])
     }
   }
 
@@ -389,13 +548,16 @@ export class Block extends BaseEntity {
     // })
   }
 
+  // if overridingBlock specified, returned asses is not sorted; else they are ordered ASC by pubKey.
   public static async * getAssHashes({
     maxBlockHeight = undefined as undefined | number,
     shouldIncludeTemporary = false,
     specificPubKey = undefined as undefined | string,
+    overridingBlock = undefined as Block,
   } = {}): AsyncGenerator<string> {
     const pageSize = 10
     let currentOffset = 0
+    const assesInOverridingBlock = overridingBlock ? [...overridingBlock.mostRecentAssociatedAccountStateSnapshots] : []
     while (true) {
       const currentQb: SelectQueryBuilder<unknown> = Block.getAssPubKeysAndHashesSqlSubquerFunction({
         maxBlockHeight,
@@ -410,20 +572,34 @@ export class Block extends BaseEntity {
       debug.debug(`done executing sql in Block.getAssHashes, currentAssHashes.length === ${currentAssHashes.length}`)
 
       if (currentAssHashes.length === 0) {
-        return
+        break
       }
 
-      for (const { hash } of currentAssHashes) {
-        yield hash
+      for (const { pubKey, hash } of currentAssHashes) {
+        const assIndexInOverridingBlock = assesInOverridingBlock.findIndex(assInOverridingBlock => assInOverridingBlock.pubKey === pubKey)
+        if (assIndexInOverridingBlock !== -1) {
+          yield assesInOverridingBlock[assIndexInOverridingBlock].hash
+          assesInOverridingBlock[assIndexInOverridingBlock] = null
+        } else {
+          yield hash
+        }
       }
       currentOffset += pageSize
     }
+
+    for (const ass of assesInOverridingBlock) {
+      if (ass !== null && (specificPubKey === undefined || ass.pubKey === specificPubKey)) {
+        yield ass.hash
+      }
+    }
   }
 
+  // if overridingBlock specified, returned asses is not sorted; else they are ordered ASC by pubKey.
   public async * getAssHashes(options: {
     maxBlockHeight?: number,
     shouldIncludeTemporary?: boolean,
     specificPubKey?: undefined | string,
+    overridingBlock?: Block,
   } = {}): AsyncGenerator<string> {
     const optionsWithHeight = Object.assign(options, {
       maxBlockHeight: this.height,
@@ -431,13 +607,16 @@ export class Block extends BaseEntity {
     yield * Block.getAssHashes(optionsWithHeight)
   }
 
+  // if overridingBlock specified, returned asses is not sorted; else they are ordered ASC by pubKey.
   public static async * getState({
     maxBlockHeight = undefined as undefined | number,
     shouldIncludeTemporary = false,
     specificPubKey = undefined as undefined | string,
+    overridingBlock = undefined as Block,
   } = {}): AsyncGenerator<AccountStateSnapshot> {
     const pageSize = 10
     let currentOffset = 0
+    const assesInOverridingBlock = overridingBlock ? [...overridingBlock.mostRecentAssociatedAccountStateSnapshots] : []
     while (true) {
       const currentQb: SelectQueryBuilder<AccountStateSnapshot> =
         createQueryBuilder()
@@ -458,22 +637,35 @@ export class Block extends BaseEntity {
       debug.debug(`done executing sql in Block.getState, currentAsses.length === ${currentAsses.length}`)
 
       if (currentAsses.length === 0) {
-        return
+        break
       }
 
       for (const ass of currentAsses) {
+        const assIndexInOverridingBlock = assesInOverridingBlock.findIndex(assInOverridingBlock => assInOverridingBlock.pubKey === ass.pubKey)
+        if (assIndexInOverridingBlock !== -1) {
+          yield assesInOverridingBlock[assIndexInOverridingBlock]
+          assesInOverridingBlock[assIndexInOverridingBlock] = null
+        }
         yield ass
       }
       currentOffset += pageSize
     }
+
+    for (const ass of assesInOverridingBlock) {
+      if (ass !== null && (specificPubKey === undefined || ass.pubKey === specificPubKey)) {
+        yield ass
+      }
+    }
   }
 
+  // if overridingBlock specified, returned asses is not sorted; else they are ordered ASC by pubKey.
   public static async getFirstSpecificState(options: {
     maxBlockHeight?: undefined | number,
     shouldIncludeTemporary?: boolean,
     specificPubKey?: undefined | string,
     shouldCreateIfNotFound?: boolean,
     targetBlockToCreateIn?: Block,
+    overridingBlock?: Block,
   } = {}): Promise<AccountStateSnapshot> {
     const {
       specificPubKey,
@@ -517,9 +709,11 @@ export class Block extends BaseEntity {
     }
   }
 
+  // if overridingBlock specified, returned asses is not sorted; else they are ordered ASC by pubKey.
   public async * getState(options: {
     shouldIncludeTemporary?: boolean,
     specificPubKey?: undefined | string,
+    overridingBlock?: Block,
   } = {}): AsyncGenerator<AccountStateSnapshot> {
     const optionsWithHeight = Object.assign(options, {
       maxBlockHeight: this.height,
@@ -527,11 +721,13 @@ export class Block extends BaseEntity {
     yield * Block.getState(optionsWithHeight)
   }
 
+  // if overridingBlock specified, returned asses is not sorted; else they are ordered ASC by pubKey.
   public async getFirstSpecificState(options: {
     shouldIncludeTemporary?: boolean,
     specificPubKey?: undefined | string,
     shouldCreateIfNotFound?: boolean,
     targetBlockToCreateIn?: Block,
+    overridingBlock?: Block,
   } = {}): Promise<AccountStateSnapshot> {
     const optionsWithHeight = Object.assign(options, {
       maxBlockHeight: this.height,
@@ -542,36 +738,39 @@ export class Block extends BaseEntity {
   public async apply({
     baseBlock,
     targetBlock = this,
+    isGenesis = false,
   }: {
     baseBlock: Block,
     targetBlock: Block,
+    isGenesis: boolean,
   }): Promise<void> {
     for (const transaction of this.transactions) {
       await transaction.apply({
         baseBlock,
         targetBlock,
+        isGenesis,
       })
     }
 
-    let isGeneratorAssInTargetBlock = true
-    let generator = targetBlock.mostRecentAssociatedAccountStateSnapshots.find(ass =>
-      ass.pubKey === this.generator)
+    const generatorAss = await baseBlock.getFirstSpecificState({
+      shouldIncludeTemporary: false,
+      shouldCreateIfNotFound: false,
+      specificPubKey: this.generator,
+      overridingBlock: targetBlock,
+    })
 
-    if (generator === undefined) {
-      generator = await baseBlock.getFirstSpecificState({
-        shouldIncludeTemporary: false,
-        shouldCreateIfNotFound: false,
-        specificPubKey: this.generator,
-      })
-      isGeneratorAssInTargetBlock = false
-    }
+    generatorAss.balance += this.transactions.map(transaction => transaction.fee).reduce((prev, curr) => prev + curr)
+    generatorAss.balance += this.mineReward
 
-    generator.balance += this.transactions.map(transaction => transaction.fee).reduce((prev, curr) => prev + curr)
-    generator.balance += this.mineReward
+    await generatorAss.calcHash({
+      shouldAssignExistingHash: true,
+      shouldAssignHash: true,
+      shouldUseExistingHash: false,
+    })
 
-    if (!isGeneratorAssInTargetBlock) {
-      targetBlock.mostRecentAssociatedAccountStateSnapshots.push(generator)
-    }
+    targetBlock.updateMostRecentAssociatedAccountStateSnapshots([generatorAss])
+
+    // TODO: other finalization
   }
 
   public static async calcStateHash(options?: {
@@ -675,6 +874,14 @@ export class Block extends BaseEntity {
     shouldAssignExistingHash?: boolean,
     shouldUseExistingAssHash?: boolean,
   }): Promise<Buffer>
+  public async calcHash(options?: {
+    encoding?: "hex" | "buffer",
+    shouldAssignHash?: boolean,
+    shouldUseExistingChildHash?: boolean,
+    shouldUseExistingStateHash?: boolean,
+    shouldAssignExistingHash?: boolean,
+    shouldUseExistingAssHash?: boolean,
+  })
   public async calcHash({
     encoding = "hex",
     shouldAssignHash = false,

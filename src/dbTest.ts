@@ -14,7 +14,7 @@ import yargs from "yargs"
 import "reflect-metadata"
 import { createConnection, getConnectionOptions, getConnection } from "typeorm"
 
-import { doNotWait, printObject, TypelessPartial } from "./xchUtil"
+import { doNotWait, printObject, TypelessPartial, printException } from "./xchUtil"
 import { Profile } from "./profile"
 
 
@@ -80,11 +80,9 @@ async function main(): Promise<void> {
     await main2()
 
   } catch (err) {
-    if (err.stack) {
-      debug.error(`Exception occurred(${err.constructor.name}). Stack: ${err.stack}`)
-    } else {
-      debug.error(`${err.constructor.name}: ${err.message}`)
-    }
+    printException(debug, err, {
+      prefix: "During running dbTest.main: ",
+    })
   }
 }
 
