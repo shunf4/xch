@@ -5,7 +5,7 @@ import { EventEmitter } from "events"
 
 import PeerInfo from "peer-info"
 import PeerId from "peer-id"
-import Multiaddr from "multiaddr"
+import Multiaddr, { protocols } from "multiaddr"
 
 import { Profile } from "./profile"
 import { sleep, colorForRgb, assignOptions, itJson } from "./xchUtil"
@@ -30,15 +30,15 @@ eventsDebug.color = chalk.hex("#AA22DD")
 const verboseDebug = Debug("xch:p2p:verbose")
 verboseDebug.color = chalk.hex("#444444")
 
-enum PubsubTopicDataType {
+export enum PubsubTopicDataType {
   Raw,
   String,
   Json
 }
 
 export class P2pLayer extends EventEmitter {
-  private static Topics: [string, PubsubTopicDataType][] = [["xch:chatty", PubsubTopicDataType.String], ["xch:blockchain", PubsubTopicDataType.Json]]
-
+  topics: [string, PubsubTopicDataType][] = []
+  protocols: string[] = []
   node: any // Libp2p
   profile: Profile
   config: XchLibp2pConfig
@@ -86,7 +86,7 @@ export class P2pLayer extends EventEmitter {
 
 
   private async subscribeForPubSub(): Promise<void> {
-    for (const [topic, dataType] of P2pLayer.Topics) {
+    for (const [topic, dataType] of this.topics) {
       await this.node.pubsub.subscribe(topic, (msg) => {
         let upperLevelData: any
         if (dataType === PubsubTopicDataType.Raw) {
@@ -139,6 +139,12 @@ export class P2pLayer extends EventEmitter {
     debug.info(`scheduled pinged ${pingPromises.length} peers`)
   }
 
+  public getRandomPeer(): PeerInfo {
+    const peers: [PeerId, PeerInfo][] = Array.from(this.node.peerStore.peers.entries())
+    const randomPeer = peers[Math.floor(Math.random() * peers.length)][1]
+    return randomPeer
+  }
+
   private async saveAllPeers(): Promise<void> {
     await getConnection()
       .createQueryBuilder()
@@ -165,7 +171,7 @@ export class P2pLayer extends EventEmitter {
     debug.info(`scheduled saved ${savePeerPromises.length} peers`)
   }
 
-  private async loadAllPeers(): Promise<void> {
+  private async loadAllPeersFromDb(): Promise<void> {
     const peerInfoEntities = await PeerInfoEntity.find({
       relations: ["multiaddrs"]
     })
@@ -175,6 +181,22 @@ export class P2pLayer extends EventEmitter {
     peerInfos.forEach(peerInfo => {
       this.node.peerStore.put(peerInfo)
     })
+  }
+
+  public async call(peer: PeerInfo, protocols: string[]): Promise<Telephone> {
+    const { stream } = await this.node.dialProtocol(peer, protocols)
+    const telephone = new Telephone({ name: `${peer.id.toB58String()}: ${protocols.join(",")}` })
+    itPipe(
+      stream,
+      itLengthPrefixed.decode(),
+      itJson.decoder,
+      telephone,
+      itJson.encoder,
+      itLengthPrefixed.encode(),
+      stream
+    )
+
+    return telephone
   }
 
   public async start(): Promise<void> {
@@ -205,11 +227,11 @@ export class P2pLayer extends EventEmitter {
     })
 
     // Add saved peers
-    await this.loadAllPeers()
+    await this.loadAllPeersFromDb()
 
     // Add protocol handlers
-    const telephone = new Telephone()
-    await this.node.handle("/test", ({ stream }) => {
+    this.node.handle("/test", ({ stream }) => {
+      const telephone = new Telephone()
       itPipe(
         stream,
         itLengthPrefixed.decode(),
@@ -221,7 +243,22 @@ export class P2pLayer extends EventEmitter {
       )
     })
 
-    // TODO: dialProtocol => telephone
+    for (const protocol of this.protocols) {
+      this.node.handle(protocol, ({ connection, stream }) => {
+        const telephone = new Telephone({ name: `${connection.remoteAddr.toString()}, ${protocol}` })
+        itPipe(
+          stream,
+          itLengthPrefixed.decode(),
+          itJson.decoder,
+          telephone,
+          itJson.encoder,
+          itLengthPrefixed.encode(),
+          stream
+        )
+
+        this.emit(protocol, telephone)
+      })
+    }
 
     // start
     await this.node.start()
@@ -230,12 +267,7 @@ export class P2pLayer extends EventEmitter {
     await this.listenForEvents()
     await this.subscribeForPubSub()
 
-    this.taskManagers.scheduledParallelism.register(new Task({
-      func: this.printKnownAddrs.bind(this),
-      description: "printKnownAddrs",
-      args: []
-    }))
-
+    this.taskManagers.scheduledParallelism?.register(this.printKnownAddrs.bind(this))
     this.taskManagers.scheduledParallelism?.register(this.pingAllPeers.bind(this))
     this.taskManagers.scheduledParallelism?.register(this.saveAllPeers.bind(this))
 

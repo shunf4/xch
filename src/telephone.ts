@@ -301,6 +301,8 @@ export class Telephone {
         printException(debug, err, {
           prefix: `During answering telephone ${this.name}: `,
         })
+
+        this.forciblyEnd()
       }
     })
   }

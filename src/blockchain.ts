@@ -1,21 +1,102 @@
-import { P2pLayer } from "./p2pLayer"
+import { P2pLayer, PubsubTopicDataType } from "./p2pLayer"
 import { Block } from "./entity/Block"
 import { TaskManagerCombination } from "./taskManagerCombination"
-import { assignOptions, assertCondition } from "./xchUtil"
+import { assignOptions, assertCondition, doNotWait, printException, assertInstanceOf } from "./xchUtil"
 import { Profile } from "./profile"
 import genesisBlockData from "../testGenesisBlock.json"
 import { AccountStateSnapshot } from "./entity/AccountStateSnapshot"
 import { getConnection } from "typeorm"
 import Constants from "./constants"
-import { BlockVerificationStateHashError, BlockVerificationGenesisError, BlockVerificationError } from "./errors"
+import { BlockVerificationStateHashError, BlockVerificationGenesisError, BlockVerificationError, VerificationError, DposError, TransactionError } from "./errors"
+import { Task, TaskType } from "./taskManager"
+import { Telephone, Handset } from "./telephone"
+import { Transaction } from "./entity/Transaction"
+
+import pDefer from "p-defer"
+import Debug from "debug"
+import { Role } from "./entity/Role"
+
+type DeferredPromise<T> = pDefer.DeferredPromise<T>
+const createDeferredPromise = pDefer
+const debug = Debug("xch:blockchain")
 
 export class Blockchain {
+  private static Topics: [string, PubsubTopicDataType][] = [
+    ["xch:chatty", PubsubTopicDataType.String],
+    ["xch:block", PubsubTopicDataType.Json],
+    ["xch:transaction", PubsubTopicDataType.Json],
+  ]
+
+  private static Protocols: string[] = [
+    "/xchSync",
+  ]
+
+
   p2pLayer: P2pLayer
   taskManagers: TaskManagerCombination
   profile: Profile
   genesisBlock: Block
+  unconfirmedTransactions: Transaction[]
+  _cachedLatestBlock: Block
 
   private constructor() {
+  }
+
+  public async getLatestBlock(): Promise<Block> {
+    if (!this._cachedLatestBlock) {
+      const generator = Block.getBlocks({
+        orderByHeight: "DESC",
+        withRelations: true,
+      })
+
+      const result = await generator.next()
+      if (result.done) {
+        return undefined
+      }
+
+      this._cachedLatestBlock = result.value
+    }
+    
+    return this._cachedLatestBlock
+  }
+
+  public async shouldAskForWholeBlockchain(receivedLatestBlock: Block): Promise<boolean> {
+    const latestBlock = await this.getLatestBlock()
+    if (latestBlock.hash !== receivedLatestBlock.hash) {
+      return true
+    }
+    return false
+  }
+
+  public async clearAll(): Promise<void> {
+    await getConnection()
+      .createQueryBuilder()
+      .delete()
+      .from(Block)
+      .execute()
+
+    await getConnection()
+      .createQueryBuilder()
+      .delete()
+      .from(Transaction)
+      .execute()
+
+    await getConnection()
+      .createQueryBuilder()
+      .delete()
+      .from(AccountStateSnapshot)
+      .execute()
+
+    await getConnection()
+      .createQueryBuilder()
+      .delete()
+      .from(Role)
+      .execute()
+
+    await this.genesisBlock.saveOverwritingSamePriorityAndHeight()
+
+    const temporaryBlock = await Block.createTemporaryBlock()
+    await temporaryBlock.saveOverwritingSamePriorityAndHeight()
   }
 
   public async verifyAllAndLoad(): Promise<void> {
@@ -233,12 +314,26 @@ export class Blockchain {
     this.genesisBlock = await Block.normalize(genesisBlockData)
 
     // 1. verify currently saved blocks
-    if (this.profile.config.blockValidationMode === "full") {
-      await this.verifyAllAndLoad()
-    } else if (this.profile.config.blockValidationMode === "mostRecent") {
-      await this.verifyMostRecentAndLoad()
-    } else {
-      // 
+
+    try {
+      if (this.profile.config.blockValidationMode === "full") {
+        await this.verifyAllAndLoad()
+      } else if (this.profile.config.blockValidationMode === "mostRecent") {
+        await this.verifyMostRecentAndLoad()
+      } else {
+        // 
+      }
+    } catch (err) {
+      if (!(err instanceof VerificationError || err instanceof DposError || err instanceof TransactionError)) {
+        throw err
+      }
+
+      printException(debug, err, {
+        prefix: "During loading blocks: ",
+        printStack: "oneLine",
+      })
+
+      await this.clearAll()
     }
   }
 
@@ -249,13 +344,143 @@ export class Blockchain {
   }): Promise<Blockchain> {
     const newBlockchain = new Blockchain()
     assignOptions(newBlockchain, options)
+    newBlockchain.p2pLayer.topics = Blockchain.Topics
+    newBlockchain.p2pLayer.protocols = Blockchain.Protocols
     return newBlockchain
+  }
+
+  public async sync(): Promise<void> {
+    const randomPeer = this.p2pLayer.getRandomPeer()
+    const telephone = await this.p2pLayer.call(randomPeer, ["/xchSync"])
+    await this.doSync(telephone, "outbound")
+  }
+
+  public async doSync(telephone: Telephone, direction: "outbound" | "inbound"): Promise<void> {
+    try {
+      const answerableDeferred = createDeferredPromise()
+
+      const unconfirmedTransactionsAnsweredDeferred = createDeferredPromise()
+      const latestBlockAnsweredDeferred = createDeferredPromise()
+      const wholeBlockchainAnsweredDeferred = createDeferredPromise()
+
+      const allAnsweredDeferreds = [
+        unconfirmedTransactionsAnsweredDeferred,
+        latestBlockAnsweredDeferred,
+        wholeBlockchainAnsweredDeferred,
+      ]
+
+      const that = this
+
+      telephone.answering("unconfirmedTransactions", async (questionContent: any, handset: Handset): Promise<any> => {
+        await answerableDeferred.promise
+        await handset.answer([...that.unconfirmedTransactions])
+        unconfirmedTransactionsAnsweredDeferred.resolve()
+      })
+
+      telephone.answering("latestBlock", async (questionContent: any, handset: Handset): Promise<any> => {
+        await answerableDeferred.promise
+        await handset.answer(await that.getLatestBlock())
+        latestBlockAnsweredDeferred.resolve()
+      })
+
+      telephone.answering("noNeedForWholeBlockchain", async (questionContent: any, handset: Handset): Promise<any> => {
+        await answerableDeferred.promise
+        await handset.answer("ok")
+        wholeBlockchainAnsweredDeferred.resolve()
+      })
+
+      const blocksGenerator = Block.getBlocks({
+        orderByHeight: "ASC",
+        withRelations: true, 
+      })
+
+      telephone.answering("moreWholeBlockchain", async (questionContent: any, handset: Handset): Promise<any> => {
+        await answerableDeferred.promise
+        const result = await blocksGenerator.next()
+        if (result.done) {
+          await handset.answer([])
+          wholeBlockchainAnsweredDeferred.resolve()
+        } else {
+          await handset.answer([result.value])
+        }
+      })
+
+      if (direction !== "outbound") {
+        answerableDeferred.resolve()
+        await Promise.all(allAnsweredDeferreds)
+      }
+
+      const receivedLatestBlock = await telephone.ask("latestBlock", {})
+      if (this.shouldAskForWholeBlockchain(receivedLatestBlock)) {
+        await this.clearAll()
+        while (true) {
+          const blocks = await telephone.ask("moreWholeBlockchain", {})
+          assertInstanceOf(blocks, Array, TypeError, "received blocks in blockchain")
+          if (blocks.length) {
+            for (const block of blocks) {
+              await this.onReceivingBlock(block)
+            }
+          } else {
+            break
+          }
+        }
+      } else {
+        await telephone.ask("noNeedForWholeBlockchain", {})
+      }
+
+      const unconfirmedTransactions = await telephone.ask("unconfirmedTransactions", {})
+      assertInstanceOf(unconfirmedTransactions, Array, TypeError, "received unconfirmedTransactions")
+
+      for (const unconfirmedTransaction of unconfirmedTransactions) {
+        await this.onReceivingTransaction(unconfirmedTransaction)
+      }
+
+      if (direction === "outbound") {
+        answerableDeferred.resolve()
+        await Promise.all(allAnsweredDeferreds)
+      }
+
+      await telephone.hangUp()
+    } catch (err) {
+      printException(debug, err, {
+        prefix: `During talking with ${telephone.name}: `,
+        printStack: "oneLine",
+      })
+    }
   }
 
   async start(): Promise<void> {
     await this.p2pLayer.start()
 
-    //await this.initializeGenesisBlock()
-    //await this.initializeBlockchain()
+    await this.load()
+    this.p2pLayer.on("xch:block", (data) => {
+      this.taskManagers.mainQueue.enqueue(new Task({
+        description: `process block ${data.hash}`,
+        func: this.onReceivingBlock.bind(this),
+        args: [data],
+      }))
+    })
+
+    this.p2pLayer.on("xch:transaction", (data) => {
+      this.taskManagers.mainQueue.enqueue(new Task({
+        description: `process transaction ${data.hash}`,
+        func: this.onReceivingTransaction.bind(this),
+        args: [data],
+      }))
+    })
+
+    this.p2pLayer.on("/xchSync", (telephone: Telephone) => {
+      this.taskManagers.mainQueue.enqueue(new Task({
+        description: `handle incoming /xchSync`,
+        func: this.doSync.bind(this),
+        args: [telephone, "inbound"],
+      }))
+    })
+
+    this.taskManagers.scheduledQueue.enqueue(new Task({
+      description: "synchronize blockchain",
+      func: this.sync.bind(this),
+      args: [],
+    }))
   }
 }

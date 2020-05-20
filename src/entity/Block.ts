@@ -456,7 +456,7 @@ export class Block extends BaseEntity {
         shouldAssignHash: true,
         shouldUseExistingHash: false,
       })
-      
+
       targetBlock.updateMostRecentAssociatedAccountStateSnapshots([...witnesses, dposAss])
     }
   }
