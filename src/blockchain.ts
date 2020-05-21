@@ -99,6 +99,46 @@ export class Blockchain {
     await temporaryBlock.saveOverwritingSamePriorityAndHeight()
   }
 
+  public async onReceivingBlock(blockData: any): Promise<void> {
+    const block = await Block.normalize(blockData, {
+      shouldCheckRelations: true,
+    })
+
+    if (block.hash === this.genesisBlock.hash) {
+      if (block.mostRecentAssociatedAccountStateSnapshots.length !== this.genesisBlock.mostRecentAssociatedAccountStateSnapshots.length) {
+        throw new BlockVerificationGenesisError(`verify genesis block: block.asses.length(${block.mostRecentAssociatedAccountStateSnapshots.length}) !== this.genesisBlock.asses.length(${this.genesisBlock.mostRecentAssociatedAccountStateSnapshots.length})`)
+      }
+
+      for (let i = 0; i < block.mostRecentAssociatedAccountStateSnapshots.length; i++) {
+        const tempAssHash = await block.mostRecentAssociatedAccountStateSnapshots[i].calcHash({
+          shouldAssignExistingHash: false,
+          shouldAssignHash: false,
+          shouldUseExistingHash: false,
+        })
+        const genesisAssHash = await this.genesisBlock.mostRecentAssociatedAccountStateSnapshots[i].calcHash({
+          shouldAssignExistingHash: false,
+          shouldAssignHash: false,
+          shouldUseExistingHash: false,
+        })
+        if (tempAssHash !== genesisAssHash) {
+          throw new BlockVerificationGenesisError(`verify received genesis block: ass [${i}]: tempAssHash(${tempAssHash}) !== genesisAssHash(${genesisAssHash})`)
+        }
+      }
+    } else {
+      await block.verifyAllButState({
+        genesisBlockHash: this.genesisBlock.hash,
+        expectedPrevHash: (await this.getLatestBlock()).hash,
+        expectedHeight: (await this.getLatestBlock()).height + 1,
+      })
+
+      
+    }
+  }
+
+  public async onReceivingTransaction(transactionData: any): Promise<void> {
+
+  }
+
   public async verifyAllAndLoad(): Promise<void> {
     const emptyBlock = await Block.normalize({
       height: -1,
