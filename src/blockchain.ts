@@ -118,11 +118,11 @@ export class Blockchain {
 
     if (block.hash === this.genesisBlock.hash) {
       if (block.mostRecentAssociatedAccountStateSnapshots.length !== this.genesisBlock.mostRecentAssociatedAccountStateSnapshots.length) {
-        throw new BlockVerificationGenesisError(`verify genesis block: block.asses.length(${block.mostRecentAssociatedAccountStateSnapshots.length}) !== this.genesisBlock.asses.length(${this.genesisBlock.mostRecentAssociatedAccountStateSnapshots.length})`)
+        throw new BlockVerificationGenesisError(`verify received genesis block: block.asses.length(${block.mostRecentAssociatedAccountStateSnapshots.length}) !== this.genesisBlock.asses.length(${this.genesisBlock.mostRecentAssociatedAccountStateSnapshots.length})`)
       }
 
       for (let i = 0; i < block.mostRecentAssociatedAccountStateSnapshots.length; i++) {
-        const tempAssHash = await block.mostRecentAssociatedAccountStateSnapshots[i].calcHash({
+        const receivedAssHash = await block.mostRecentAssociatedAccountStateSnapshots[i].calcHash({
           shouldAssignExistingHash: false,
           shouldAssignHash: false,
           shouldUseExistingHash: false,
@@ -132,18 +132,74 @@ export class Blockchain {
           shouldAssignHash: false,
           shouldUseExistingHash: false,
         })
-        if (tempAssHash !== genesisAssHash) {
-          throw new BlockVerificationGenesisError(`verify received genesis block: ass [${i}]: tempAssHash(${tempAssHash}) !== genesisAssHash(${genesisAssHash})`)
+        if (receivedAssHash !== genesisAssHash) {
+          throw new BlockVerificationGenesisError(`verify received genesis block: ass [${i}]: receivedAssHash(${receivedAssHash}) !== genesisAssHash(${genesisAssHash})`)
         }
+
+        // Then do nothing. We have the genesis block already.
       }
     } else {
+      const savedUnconfirmedTransactions = [...this.unconfirmedTransactions]
+      const latestBlock = await this.getLatestBlock()
+
+      let temporaryBlock: Block
+      temporaryBlock = await Block.createTemporaryBlock()
+
+      // 0. clear unconfirmed transactions and state in block of temporary priority
+      await temporaryBlock.clearAndSave()
+
+      // 1. verify this block
       await block.verifyAllButState({
         genesisBlockHash: this.genesisBlock.hash,
-        expectedPrevHash: (await this.getLatestBlock()).hash,
-        expectedHeight: (await this.getLatestBlock()).height + 1,
+        expectedPrevHash: latestBlock.hash,
+        expectedHeight: latestBlock.height + 1,
       })
 
-      
+      // 2. apply transactions
+      for (const transaction of block.transactions) {
+        await transaction.apply({
+          baseBlock: latestBlock,
+          targetBlock: temporaryBlock,
+          isGenesis: false,
+        })
+      }
+
+      await temporaryBlock.saveOverwritingSamePriorityAndHeight()
+
+      // 3. verify account state snapshot hash
+      for (const receivedAss of block.mostRecentAssociatedAccountStateSnapshots) {
+        const expectedReceivedAssHash = await receivedAss.calcHash({
+          shouldAssignExistingHash: false,
+          shouldAssignHash: false,
+          shouldUseExistingHash: false,
+        })
+        if (receivedAss.hash !== expectedReceivedAssHash) {
+          throw new BlockVerificationStateHashError(`verify block(${block.priority}, ${block.height}): invalid new account state snapshots hash: ${receivedAss.hash} (expected ${expectedReceivedAssHash})`)
+        }
+      }
+
+      await block.saveOverwritingSamePriorityAndHeight()
+
+      // 4. compare computed ASSes and ASSes shipped with block
+      const stateHashBasedOnAssesInBlock = await block.calcStateHash({
+        shouldAssignHash: false,
+        shouldUseExistingHash: true, // TODO: shouldUseExistingHash: true proper?
+      })
+
+      // when calculating state hash, we need only saved hash of each ASS
+      const stateHashBasedOnJustComputedAsses = await Block.calcStateHash({
+        assesOrAssHashes: Block.getAssHashes({
+          shouldIncludeTemporary: true,
+          maxBlockHeight: latestBlock.height - 1,
+        }),
+      })
+
+      if (stateHashBasedOnJustComputedAsses !== stateHashBasedOnAssesInBlock || stateHashBasedOnJustComputedAsses !== block.stateHash) {
+        throw new BlockVerificationStateHashError(`verify recieved block(${block.priority}, ${block.height}): invalid state hash: block.stateHash: ${block.stateHash}, from block.mostRecent and previous: ${stateHashBasedOnAssesInBlock}, just computed(expected): ${stateHashBasedOnJustComputedAsses}`)
+      }
+
+      // CONTINUE
+      // IN CASE OF EXCEPTION, RESTORE SAVED BLOCK
     }
   }
 
@@ -268,8 +324,10 @@ export class Blockchain {
 
       const stateHashBasedOnAssesInBlock = await block.calcStateHash({
         shouldAssignHash: false,
-        shouldUseExistingHash: true,
+        shouldUseExistingHash: true, // TODO: shouldUseExistingHash: true proper?
       })
+
+      // when calculating state hash, we need only saved hash of each ASS
       const stateHashBasedOnJustComputedAsses = await Block.calcStateHash({
         assesOrAssHashes: Block.getAssHashes({
           shouldIncludeTemporary: true,
