@@ -398,3 +398,24 @@ export function printException(debug: any, err: Error, {
     debug.error(`${prefix}Exception occurred(${err.constructor.name}): ${err.message}`)
   }
 }
+
+export function camelCaseToWords(camel: string): string[] {
+  return (!camel) ? [] :
+    camel.split(/(?=[A-Z])/).map(word =>
+      word ? word.charAt(0).toLowerCase() + word.slice(1) : "")
+}
+
+export function wordsToCamelCase(words: string[]): string {
+  return words.map((word, index) => index ? word.charAt(0).toUpperCase() + word.toLowerCase().slice(1) : word.toLowerCase()).join("")
+}
+
+export function addConsoleFunctions(debug: any, that: any, argMap: Map<string, (args: string[]) => Promise<any>>, functions: ((args: string[]) => Promise<any>)[]): void {
+  for (let f of functions) {
+    f = f.bind(that)
+    const funcNameWords = camelCaseToWords(f.name)
+    if (funcNameWords[0] !== "api") {
+      debug.error(`addConsoleFunctions: adding ${f.name} which do not start with "api"`)
+    }
+    argMap.set(f.name, f)
+  }
+}

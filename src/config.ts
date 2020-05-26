@@ -4,7 +4,7 @@ import Constants from "./constants"
 import Debug from "debug-level"
 import { KeyType } from "libp2p-crypto"
 import { ConfigValueError, ConfigTypeError } from "./errors"
-import { assertInstanceOf, assertType } from "./xchUtil"
+import { assertInstanceOf, assertType, assertCondition, greaterThan, lessThanOrEqualTo } from "./xchUtil"
 
 const debug = Debug("xch:config")
 
@@ -24,6 +24,8 @@ interface IXchLibp2pConfig {
   extraAccountPeerIds: PeerId[],
 
   blockValidationMode: string,
+
+  consoleServerPort: number,
 }
 
 
@@ -72,6 +74,9 @@ const XchLibp2pConfigDefaultGenerator: DefaultGenerator<IXchLibp2pConfig> = {
   blockValidationMode: async () => {
     return "mostRecent"
   },
+  consoleServerPort: async() => {
+    return Constants.DefaultConsoleServerPort
+  }
 }
 
 const _stringArrayNormalizer = async (input: any): Promise<string[]> => {
@@ -158,6 +163,13 @@ const XchLibp2pConfigNormalizer: Normalizer<IXchLibp2pConfig> = {
     } else {
       throw new ConfigValueError(`invalid config.blockValidationMode value: ${input}`)
     }
+  },
+  consoleServerPort: async (input: any) => {
+    assertType(input, "number", ConfigTypeError, "config.consoleServerPort")
+    assertCondition(input, Number.isInteger, ConfigTypeError, "config.consoleServerPort")
+    assertCondition(input, [[greaterThan(0), lessThanOrEqualTo(65535)]], ConfigTypeError, "config.consoleServerPort")
+
+    return input
   }
 }
 
@@ -175,6 +187,7 @@ export class XchLibp2pConfig implements IXchLibp2pConfig {
   listenAddrs: string[]
   extraAccountPeerIds: PeerId[]
   blockValidationMode: string
+  consoleServerPort: number
 
   toString(): string {
     return YAML.stringify(this)

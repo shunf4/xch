@@ -63,3 +63,17 @@ export class DposInsufficientWitnessError extends DposError {}
 export class DposInvalidWitnessError extends DposError {}
 
 export class DposDataInvalidError extends Error {}
+
+export class ConsoleError extends Error {
+  extra: any
+  constructor(message?: string, extra?: any) {
+    super(message)
+    this.extra = extra ? extra : {}
+  }
+}
+
+export class ConsoleArgsError extends ConsoleError {}
+
+export class ConsoleMoreArgsNeededError extends ConsoleError {}
+
+export class ConsoleSignatureNeededError extends ConsoleError {}

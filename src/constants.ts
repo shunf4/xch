@@ -34,6 +34,7 @@ const Constants = {
   },
 
   DefaultListenAddrs: ["/ip4/0.0.0.0/tcp/31789"],
+  DefaultConsoleServerPort: 5012,
 
   IdleTaskTime: 6000,
   ScheduledTaskTime: 10000,

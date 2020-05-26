@@ -28,7 +28,8 @@ let profile: Profile
 let taskManagers: TaskManagerCombination
 let p2pLayer: P2pLayer
 let blockchain: Blockchain
-
+let consoleApi: ConsoleApi
+let consoleServer: ConsoleServer
 
 async function readArgv(): Promise<any> {
   const argv: any = yargs.default("profileDir", "./.xch").argv
@@ -85,11 +86,14 @@ async function init(): Promise<void> {
 
   p2pLayer = await P2pLayer.create({ profile, taskManagers })
   blockchain = await Blockchain.create({ profile, p2pLayer, taskManagers })
+  consoleApi = await ConsoleApi.create({ profile, p2pLayer, blockchain, taskManagers })
+  consoleServer = await ConsoleServer.create({ profile, p2pLayer, blockchain, taskManagers. consoleApi })
 }
 
 async function start(): Promise<void> {
   await blockchain.start()
   await taskManagers.scheduler.start()
+  await consoleServer.start()
   // addTaskManagerDebugTask({ taskManagers, debug })
 }
 

@@ -8,7 +8,7 @@ import PeerId from "peer-id"
 import Multiaddr, { protocols } from "multiaddr"
 
 import { Profile } from "./profile"
-import { sleep, colorForRgb, assignOptions, itJson } from "./xchUtil"
+import { sleep, colorForRgb, assignOptions, itJson, camelCaseToWords, addConsoleFunctions } from "./xchUtil"
 import Debug from "debug-level"
 import chalk from "chalk"
 import { XchLibp2pConfig } from "./config"
@@ -53,6 +53,10 @@ export class P2pLayer extends EventEmitter {
     assignOptions(newP2pLayer, options)
 
     return newP2pLayer
+  }
+
+  public addConsoleFunctions(argMap: Map<string, (args: string[]) => Promise<any>>): void {
+    addConsoleFunctions(debug, this, argMap, [])
   }
 
   private async substitutePublicAddress(): Promise<void> {

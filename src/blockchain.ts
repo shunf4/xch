@@ -1,7 +1,7 @@
 import { P2pLayer, PubsubTopicDataType } from "./p2pLayer"
 import { Block } from "./entity/Block"
 import { TaskManagerCombination } from "./taskManagerCombination"
-import { assignOptions, assertCondition, doNotWait, printException, assertInstanceOf } from "./xchUtil"
+import { assignOptions, assertCondition, doNotWait, printException, assertInstanceOf, addConsoleFunctions } from "./xchUtil"
 import { Profile } from "./profile"
 import genesisBlockData from "../testGenesisBlock.json"
 import { AccountStateSnapshot } from "./entity/AccountStateSnapshot"
@@ -40,6 +40,18 @@ export class Blockchain {
   _cachedLatestBlock: Block
 
   private constructor() {
+  }
+
+  public static async create(options: {
+    p2pLayer: P2pLayer,
+    taskManagers: TaskManagerCombination,
+    profile: Profile,
+  }): Promise<Blockchain> {
+    const newBlockchain = new Blockchain()
+    assignOptions(newBlockchain, options)
+    newBlockchain.p2pLayer.topics = Blockchain.Topics
+    newBlockchain.p2pLayer.protocols = Blockchain.Protocols
+    return newBlockchain
   }
 
   public async getLatestBlock(): Promise<Block> {
@@ -375,18 +387,6 @@ export class Blockchain {
 
       await this.clearAll()
     }
-  }
-
-  public static async create(options: {
-    p2pLayer: P2pLayer,
-    taskManagers: TaskManagerCombination,
-    profile: Profile,
-  }): Promise<Blockchain> {
-    const newBlockchain = new Blockchain()
-    assignOptions(newBlockchain, options)
-    newBlockchain.p2pLayer.topics = Blockchain.Topics
-    newBlockchain.p2pLayer.protocols = Blockchain.Protocols
-    return newBlockchain
   }
 
   public async sync(): Promise<void> {
